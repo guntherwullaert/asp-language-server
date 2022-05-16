@@ -1,12 +1,14 @@
 use tree_sitter::{Tree, Query, QueryCursor};
 use tower_lsp::{lsp_types::{Range, Diagnostic, Position, DiagnosticSeverity}, Client};
 
-use crate::document::DocumentData;
+use crate::{document::DocumentData, treeutils::humanize_token};
 
 /**
  * ERROR CODES TREE-SITTER
  */
-const UNKNOWN_PARSE_ERROR : i32 = 1000; 
+const UNKNOWN_PARSE_ERROR : i32 = 1000;
+const EXPECTED_DOT_PARSE_ERROR : i32 = 1001; 
+const EXPECTED_MISSING_PARSE_ERROR : i32 = 1002; 
 
 #[derive(Debug)]
 pub struct DiagnosticsAnalyzer {
@@ -35,7 +37,7 @@ impl DiagnosticsAnalyzer {
      */
     fn search_for_tree_error(&self, tree: &Tree, source: &String) -> Vec<tower_lsp::lsp_types::Diagnostic>{
         let mut diagnostics = Vec::new();
-        let mut query_cursor = QueryCursor::new();
+        /*let mut query_cursor = QueryCursor::new();
 
         //Create a query to search for
         let query = Query::new(
@@ -66,6 +68,82 @@ impl DiagnosticsAnalyzer {
                     UNKNOWN_PARSE_ERROR, 
                     format!("Unexpected tokens: '{}'!", capture.node.utf8_text(source.as_bytes()).unwrap())
                 ));
+            }
+        }
+
+        return diagnostics;*/
+
+        //Look for error nodes in the parse tree
+    
+        let mut cursor = tree.walk();
+
+        let mut reached_root = false;
+        while !reached_root {
+            let node = cursor.node();
+            if node.is_error() {
+                let next = node.prev_sibling();
+                let mut found = false;
+                if next.is_some() {
+                    if next.unwrap().kind() == "statement" {
+                        //Found an error which is preceeded by an statement, most likely a . is missing
+                        diagnostics.push(self.create_tree_sitter_diagnostic(
+                            node.range(), 
+                            DiagnosticSeverity::ERROR, 
+                            EXPECTED_DOT_PARSE_ERROR, 
+                            format!("syntax error while parsing value: '{}', expected: '.'", node.utf8_text(source.as_bytes()).unwrap())
+                        ));
+
+                        //Don't go deeper into the error node
+                        let mut retracing = true;
+                        while retracing{
+                            if !cursor.goto_parent() {
+                                retracing = false;
+                                reached_root = true;
+                            }
+
+                            if cursor.goto_next_sibling() {
+                                retracing = false;
+                            }
+                        }
+                        continue;
+                    }
+                }
+                
+                //If we reach here, we do not have a guess why the error occured
+                diagnostics.push(self.create_tree_sitter_diagnostic(
+                    node.range(),
+                    DiagnosticSeverity::ERROR, 
+                    UNKNOWN_PARSE_ERROR, 
+                    format!("syntax error while parsing value: '{}'", node.utf8_text(source.as_bytes()).unwrap())
+                ));
+            }
+            else if node.is_missing() {
+                diagnostics.push(self.create_tree_sitter_diagnostic(
+                    node.range(),
+                    DiagnosticSeverity::ERROR, 
+                    EXPECTED_MISSING_PARSE_ERROR, 
+                    format!("syntax error while parsing, expected: '{}'", humanize_token(&node.kind().to_string()))
+                ));
+            }
+
+            if cursor.goto_first_child(){
+                continue;
+            }
+
+            if cursor.goto_next_sibling(){
+                continue;
+            }
+
+            let mut retracing = true;
+            while retracing{
+                if !cursor.goto_parent() {
+                    retracing = false;
+                    reached_root = true;
+                }
+
+                if cursor.goto_next_sibling() {
+                    retracing = false;
+                }
             }
         }
 

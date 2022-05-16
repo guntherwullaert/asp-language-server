@@ -14,6 +14,7 @@ use tree_sitter::{Parser, Language};
 
 mod diagnostics;
 mod document;
+mod treeutils;
 
 use diagnostics::{DiagnosticsAnalyzer};
 
