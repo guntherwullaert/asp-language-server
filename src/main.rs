@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dashmap::DashMap;
+use document::DocumentData;
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,12 +12,17 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use tree_sitter::{Parser, Language};
 
+mod diagnostics;
+mod document;
+
+use diagnostics::{DiagnosticsAnalyzer};
+
 extern "C" { fn tree_sitter_clingo() -> Language; }
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    document_map: DashMap<String, tree_sitter::Tree>,
+    document_map: DashMap<String, DocumentData>
 }
 
 #[tower_lsp::async_trait]
@@ -76,7 +82,7 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, format!("file {} opened!", params.text_document.uri))
             .await;
         
-        self.on_change(&params.text_document.uri.to_string(), &params.text_document.text).await;
+        self.on_change(&params.text_document.uri, &params.text_document.text, params.text_document.version).await;
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
@@ -92,23 +98,8 @@ impl LanguageServer for Backend {
         .await;
 
         for change in params.content_changes{
-            let range;
-            match change.range {
-                None => {
-                        self.client.log_message(MessageType::ERROR, format!("Document change event for {} without range provided!", uri))
-                        .await;
-                        continue;
-                    }
-                Some(r) => range = r
-            }
-
-            self.client.log_message(MessageType::LOG, format!("Start: (c:{}, l:{})\nEnd: (c:{}, l:{})\nChange: {}\n", range.start.character, range.start.line, range.end.character, range.end.line, change.text))
-            .await;
-
-            self.on_change(&uri, &change.text).await;
+            self.on_change(&params.text_document.uri, &change.text, params.text_document.version).await;
         }
-
-        
     }
 
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
@@ -137,7 +128,7 @@ impl Notification for CustomNotification {
 }
 impl Backend {
     
-    async fn on_change(&self, uri: &String, document: &String) {
+    async fn on_change(&self, uri: &Url, document: &String, version: i32) {
         // Create a Parser for this document
         let mut parser = Parser::new();
         parser
@@ -146,7 +137,11 @@ impl Backend {
         
         // Parse the document and save the parse tree in a hashmap
         let tree = parser.parse(document, None).unwrap();
-        self.document_map.insert(uri.clone(), tree);
+        let doc = DocumentData::new(uri.clone(), tree, document.clone(), version);
+        self.document_map.insert(uri.to_string(), doc);
+
+        // Run diagnostics for that file
+        DiagnosticsAnalyzer::new(100).run(&self.document_map.get(&uri.to_string()).unwrap(), &self.client).await;
     }
 }
 
