@@ -1,28 +1,27 @@
 use dashmap::DashMap;
 use document::DocumentData;
 use serde::{Deserialize, Serialize};
-use tower_lsp::jsonrpc::{Result};
+use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use tree_sitter::{Parser};
+use tree_sitter::Parser;
 
 mod diagnostics;
 mod document;
 mod treeutils;
 
-use diagnostics::{DiagnosticsAnalyzer};
+use diagnostics::DiagnosticsAnalyzer;
 
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    document_map: DashMap<String, DocumentData>
+    document_map: DashMap<String, DocumentData>,
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             server_info: None,
@@ -71,29 +70,49 @@ impl LanguageServer for Backend {
             .await;
     }
 
-
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, format!("file {} opened!", params.text_document.uri))
+            .log_message(
+                MessageType::INFO,
+                format!("file {} opened!", params.text_document.uri),
+            )
             .await;
-        
-        self.on_change(&params.text_document.uri, &params.text_document.text, params.text_document.version).await;
+
+        self.on_change(
+            &params.text_document.uri,
+            &params.text_document.text,
+            params.text_document.version,
+        )
+        .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
 
         if !self.document_map.contains_key(&uri) {
-            self.client.log_message(MessageType::ERROR, format!("Document {} changed before opening!", uri))
-            .await;
+            self.client
+                .log_message(
+                    MessageType::ERROR,
+                    format!("Document {} changed before opening!", uri),
+                )
+                .await;
             return;
         }
 
-        self.client.log_message(MessageType::LOG, format!("Document change incomming for document: {}\n", uri))
-        .await;
+        self.client
+            .log_message(
+                MessageType::LOG,
+                format!("Document change incomming for document: {}\n", uri),
+            )
+            .await;
 
-        for change in params.content_changes{
-            self.on_change(&params.text_document.uri, &change.text, params.text_document.version).await;
+        for change in params.content_changes {
+            self.on_change(
+                &params.text_document.uri,
+                &change.text,
+                params.text_document.version,
+            )
+            .await;
         }
     }
 
@@ -122,21 +141,25 @@ impl Notification for CustomNotification {
     const METHOD: &'static str = "custom/notification";
 }
 impl Backend {
-    
     async fn on_change(&self, uri: &Url, document: &String, version: i32) {
         // Create a Parser for this document
         let mut parser = Parser::new();
         parser
             .set_language(tree_sitter_clingo::language())
             .expect("Error loading clingo grammar");
-        
+
         // Parse the document and save the parse tree in a hashmap
         let tree = parser.parse(document, None).unwrap();
         let doc = DocumentData::new(uri.clone(), tree, document.clone(), version);
         self.document_map.insert(uri.to_string(), doc);
 
         // Run diagnostics for that file
-        DiagnosticsAnalyzer::new(100).run(&self.document_map.get(&uri.to_string()).unwrap(), &self.client).await;
+        DiagnosticsAnalyzer::new(100)
+            .run(
+                &self.document_map.get(&uri.to_string()).unwrap(),
+                &self.client,
+            )
+            .await;
     }
 }
 

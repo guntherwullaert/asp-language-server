@@ -9,7 +9,12 @@ pub struct DocumentData {
     pub version: i32,
 }
 impl DocumentData {
-    pub fn new(uri: Url, tree: Tree, source: String, version: i32) -> DocumentData{
-        return DocumentData { uri, tree, source, version }
+    pub fn new(uri: Url, tree: Tree, source: String, version: i32) -> DocumentData {
+        DocumentData {
+            uri,
+            tree,
+            source,
+            version,
+        }
     }
 }
