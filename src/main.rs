@@ -1,24 +1,18 @@
-use std::collections::{HashMap, HashSet};
-
 use dashmap::DashMap;
 use document::DocumentData;
-use ropey::Rope;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use tower_lsp::jsonrpc::{ErrorCode, Result};
+use tower_lsp::jsonrpc::{Result};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use tree_sitter::{Parser, Language};
+use tree_sitter::{Parser};
 
 mod diagnostics;
 mod document;
 mod treeutils;
 
 use diagnostics::{DiagnosticsAnalyzer};
-
-extern "C" { fn tree_sitter_clingo() -> Language; }
 
 #[derive(Debug)]
 struct Backend {
@@ -86,10 +80,10 @@ impl LanguageServer for Backend {
         self.on_change(&params.text_document.uri, &params.text_document.text, params.text_document.version).await;
     }
 
-    async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
 
-        if (!self.document_map.contains_key(&uri)){
+        if !self.document_map.contains_key(&uri) {
             self.client.log_message(MessageType::ERROR, format!("Document {} changed before opening!", uri))
             .await;
             return;

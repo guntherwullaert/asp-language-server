@@ -1,4 +1,4 @@
-use tree_sitter::{Tree, Query, QueryCursor};
+use tree_sitter::{Tree};
 use tower_lsp::{lsp_types::{Range, Diagnostic, Position, DiagnosticSeverity}, Client};
 
 use crate::{document::DocumentData, treeutils::humanize_token};
@@ -80,9 +80,13 @@ impl DiagnosticsAnalyzer {
         let mut reached_root = false;
         while !reached_root {
             let node = cursor.node();
+
+            if self.current_number_of_problems >= self.maximum_number_of_problems {
+                return diagnostics
+            };
+
             if node.is_error() {
                 let next = node.prev_sibling();
-                let mut found = false;
                 if next.is_some() {
                     if next.unwrap().kind() == "statement" {
                         //Found an error which is preceeded by an statement, most likely a . is missing
