@@ -36,7 +36,10 @@ pub fn retrace(mut cursor: TreeCursor) -> (TreeCursor, bool) {
     (cursor, reached_root)
 }
 
-pub fn create_simple_query<'a>(
+/**
+ * Do a simple query on a part of the parse tree and return the captures
+ */
+pub fn do_simple_query<'a>(
     query_string: &'a str,
     node: tree_sitter::Node<'a>,
     source: &'a [u8],

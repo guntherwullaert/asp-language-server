@@ -1,9 +1,12 @@
 use dashmap::DashMap;
-use tower_lsp::{lsp_types::{DiagnosticSeverity, MessageType}, Client};
+use tower_lsp::{
+    lsp_types::{DiagnosticSeverity, MessageType},
+    Client,
+};
 
 use crate::{
     document::DocumentData,
-    treeutils::{create_simple_query, retrace},
+    treeutils::{do_simple_query, retrace},
 };
 
 use super::{diagnostic_run_data::DiagnosticsRunData, error_codes::*};
@@ -11,10 +14,7 @@ use super::{diagnostic_run_data::DiagnosticsRunData, error_codes::*};
 /**
  * Walk through the parse tree and analyze the statements
  */
-pub fn statement_analysis(
-    diagnostic_data: &mut DiagnosticsRunData,
-    document: &DocumentData,
-) {
+pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &DocumentData) {
     let mut cursor = document.tree.walk();
 
     let mut reached_root = false;
@@ -32,7 +32,7 @@ pub fn statement_analysis(
             let mut safe_variables: Vec<&str> = Vec::new();
 
             //Create a query to search for the variables in the statement
-            let all_captures = create_simple_query(
+            let all_captures = do_simple_query(
                 r#"
                 ((VARIABLE) @variable)
                 "#,
@@ -61,7 +61,8 @@ pub fn statement_analysis(
                                 range,
                                 DiagnosticSeverity::ERROR,
                                 0,
-                                "(statement analysis) reached root without, reaching a known node!".to_string(),
+                                "(statement analysis) reached root without, reaching a known node!"
+                                    .to_string(),
                             );
                             break;
                         }

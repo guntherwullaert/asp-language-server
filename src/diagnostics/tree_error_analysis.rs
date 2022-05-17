@@ -1,7 +1,13 @@
-use tower_lsp::{lsp_types::DiagnosticSeverity, Client};
+use std::fmt::Debug;
+
+use tower_lsp::{
+    lsp_types::{DiagnosticSeverity, NumberOrString},
+    Client,
+};
 
 use crate::{
     document::DocumentData,
+    test_utils::create_test_document,
     treeutils::{humanize_token, retrace},
 };
 
@@ -10,10 +16,7 @@ use super::{diagnostic_run_data::DiagnosticsRunData, error_codes::*};
 /**
 * Search for errors in the parse tree.
 */
-pub fn search_for_tree_error(
-    diagnostic_data: &mut DiagnosticsRunData,
-    document: &DocumentData,
-) {
+pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document: &DocumentData) {
     let mut cursor = document.tree.walk();
 
     let mut reached_root = false;
@@ -77,4 +80,76 @@ pub fn search_for_tree_error(
 
         (cursor, reached_root) = retrace(cursor);
     }
+}
+
+#[test]
+fn unknown_character_should_throw_unknown_parser_error() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    search_for_tree_error(&mut diags, &create_test_document("a b.".to_string()));
+
+    assert_eq!(diags.total_diagnostics.len(), 1);
+
+    assert_eq!(
+        format!(
+            "{:?}",
+            diags
+                .total_diagnostics
+                .get(0)
+                .unwrap()
+                .code
+                .clone()
+                .unwrap()
+        ),
+        format!("Number({})", UNKNOWN_PARSE_ERROR)
+    );
+}
+
+#[test]
+fn if_parser_expects_dot_throw_dot_parser_error() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    search_for_tree_error(
+        &mut diags,
+        &create_test_document("a. d c :- a.".to_string()),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 1);
+
+    assert_eq!(
+        format!(
+            "{:?}",
+            diags
+                .total_diagnostics
+                .get(0)
+                .unwrap()
+                .code
+                .clone()
+                .unwrap()
+        ),
+        format!("Number({})", EXPECTED_DOT_PARSE_ERROR)
+    );
+}
+
+#[test]
+fn if_parser_misses_token_throw_missing_token() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    search_for_tree_error(&mut diags, &create_test_document("a(b.".to_string()));
+
+    assert_eq!(diags.total_diagnostics.len(), 1);
+
+    assert_eq!(
+        format!(
+            "{:?}",
+            diags
+                .total_diagnostics
+                .get(0)
+                .unwrap()
+                .code
+                .clone()
+                .unwrap()
+        ),
+        format!("Number({})", EXPECTED_MISSING_PARSE_ERROR)
+    );
 }

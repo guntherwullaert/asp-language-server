@@ -11,6 +11,7 @@ use tree_sitter::Parser;
 
 mod diagnostics;
 mod document;
+mod test_utils;
 mod treeutils;
 
 #[derive(Debug)]
