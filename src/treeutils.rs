@@ -1,4 +1,4 @@
-use tree_sitter::TreeCursor;
+use tree_sitter::{Query, QueryCursor, TreeCursor};
 
 /**
  * Convert a token value into a human readable string
@@ -8,6 +8,10 @@ pub fn humanize_token(token: &String) -> String {
         ")".to_string()
     } else if token == "LPAREN" {
         "(".to_string()
+    } else if token == "RBRACE" {
+        "}".to_string()
+    } else if token == "LBRACE" {
+        "{".to_string()
     } else {
         return format!("UNKNOWN TOKEN CONVERSION: {}", token);
     }
@@ -30,4 +34,27 @@ pub fn retrace(mut cursor: TreeCursor) -> (TreeCursor, bool) {
         }
     }
     (cursor, reached_root)
+}
+
+pub fn create_simple_query<'a>(
+    query_string: &'a str,
+    node: tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> std::vec::Vec<(tree_sitter::Range, &'a str, tree_sitter::Node<'a>)> {
+    let mut query_cursor = QueryCursor::new();
+    let query = Query::new(tree_sitter_clingo::language(), query_string).unwrap();
+
+    let matches = query_cursor.matches(&query, node, source);
+    let mut output = Vec::new();
+
+    for each_match in matches {
+        for capture in each_match.captures.iter() {
+            let range = capture.node.range();
+            let name = capture.node.utf8_text(source).unwrap();
+
+            output.push((range, name, capture.node));
+        }
+    }
+
+    output
 }

@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use diagnostics::run_diagnostics;
 use document::DocumentData;
 use serde::{Deserialize, Serialize};
 use tower_lsp::jsonrpc::Result;
@@ -11,8 +12,6 @@ use tree_sitter::Parser;
 mod diagnostics;
 mod document;
 mod treeutils;
-
-use diagnostics::DiagnosticsAnalyzer;
 
 #[derive(Debug)]
 struct Backend {
@@ -154,12 +153,12 @@ impl Backend {
         self.document_map.insert(uri.to_string(), doc);
 
         // Run diagnostics for that file
-        DiagnosticsAnalyzer::new(100)
-            .run(
-                &self.document_map.get(&uri.to_string()).unwrap(),
-                &self.client,
-            )
-            .await;
+        run_diagnostics(
+            &self.client,
+            &self.document_map.get(&uri.to_string()).unwrap(),
+            100,
+        )
+        .await;
     }
 }
 
