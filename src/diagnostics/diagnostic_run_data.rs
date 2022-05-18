@@ -79,11 +79,12 @@ impl DiagnosticsRunData {
         self.current_number_of_problems += 1;
     }
 
+    #[cfg(test)]
     pub fn create_test_diagnostics() -> DiagnosticsRunData {
-        return DiagnosticsRunData {
+        DiagnosticsRunData {
             maximum_number_of_problems: 100,
             current_number_of_problems: 0,
             total_diagnostics: Vec::new(),
-        };
+        }
     }
 }

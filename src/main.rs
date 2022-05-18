@@ -11,8 +11,10 @@ use tree_sitter::Parser;
 
 mod diagnostics;
 mod document;
-mod test_utils;
 mod treeutils;
+
+#[cfg(test)]
+mod test_utils;
 
 #[derive(Debug)]
 struct Backend {

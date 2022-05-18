@@ -1,15 +1,12 @@
-use std::fmt::Debug;
-
-use tower_lsp::{
-    lsp_types::{DiagnosticSeverity, NumberOrString},
-    Client,
-};
+use tower_lsp::lsp_types::DiagnosticSeverity;
 
 use crate::{
     document::DocumentData,
-    test_utils::create_test_document,
     treeutils::{humanize_token, retrace},
 };
+
+#[cfg(test)]
+use crate::test_utils::create_test_document;
 
 use super::{diagnostic_run_data::DiagnosticsRunData, error_codes::*};
 

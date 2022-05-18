@@ -36,6 +36,6 @@ a(N) :- N = #count{X : count(X).
 Ensure that each opened parantheses is also closed again.
 Examples:
 ```
-a. b(c. c).
+a. b(c). c.
 a(N) :- N = #count{X : count(X)}.
 ```

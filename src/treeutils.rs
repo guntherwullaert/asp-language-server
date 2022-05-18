@@ -12,6 +12,8 @@ pub fn humanize_token(token: &String) -> String {
         "}".to_string()
     } else if token == "LBRACE" {
         "{".to_string()
+    } else if token == "DOT" {
+        ".".to_string()
     } else {
         return format!("UNKNOWN TOKEN CONVERSION: {}", token);
     }
@@ -39,6 +41,7 @@ pub fn retrace(mut cursor: TreeCursor) -> (TreeCursor, bool) {
 /**
  * Do a simple query on a part of the parse tree and return the captures
  */
+#[allow(dead_code)]
 pub fn do_simple_query<'a>(
     query_string: &'a str,
     node: tree_sitter::Node<'a>,
