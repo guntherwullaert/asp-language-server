@@ -7,6 +7,7 @@ pub struct DocumentData {
     pub tree: Tree,
     pub source: String,
     pub version: i32,
+    pub semantic: EncodingSemantics
 }
 impl DocumentData {
     pub fn new(uri: Url, tree: Tree, source: String, version: i32) -> DocumentData {

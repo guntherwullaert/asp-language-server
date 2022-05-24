@@ -2,12 +2,12 @@ use dashmap::DashMap;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tree_sitter::{Node, TreeCursor};
 
-use crate::{document::DocumentData, treeutils::retrace};
+use crate::{document::DocumentData};
 
 #[cfg(test)]
 use crate::test_utils::create_test_document;
 
-use super::{diagnostic_run_data::DiagnosticsRunData, error_codes::*};
+use super::{diagnostic_run_data::DiagnosticsRunData, diagnostic_codes::DiagnosticsCode, tree_utils::retrace};
 
 /**
  * Walk through the parse tree and analyze the statements
@@ -227,7 +227,7 @@ fn throw_unsafe_error_for_vars(
             diagnostic_data.create_linter_diagnostic(
                 *range,
                 DiagnosticSeverity::ERROR,
-                UNSAFE_VARIABLE,
+                DiagnosticsCode::UnsafeVariable.into_i32(),
                 format!("'{}' is unsafe", var.key()),
             );
         }
@@ -253,7 +253,7 @@ fn unsafe_variables_should_be_detected_no_body() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -276,7 +276,7 @@ fn unsafe_variables_should_be_detected_no_variables_in_body() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -314,7 +314,7 @@ fn safeness_should_be_blocked_by_not() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -340,7 +340,7 @@ fn safeness_should_be_blocked_by_multiple_nots() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -387,7 +387,7 @@ fn unsafe_variables_should_be_detected_in_choice_rule_with_no_body() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -425,7 +425,7 @@ fn unsafe_variables_should_be_detected_in_choice_rule() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -463,7 +463,7 @@ fn unsafe_variables_should_be_detected_in_conjunctions() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -501,7 +501,7 @@ fn unsafe_variables_should_be_detected_in_conjunctions_with_not() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -527,7 +527,7 @@ fn unsafe_variables_should_be_detected_in_show() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -565,7 +565,7 @@ fn unsafe_variables_should_be_detected_with_aggregates() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -591,7 +591,7 @@ fn unsafe_variables_should_be_detected_with_aggregates_and_disjunction() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -629,7 +629,7 @@ fn unsafe_variables_should_be_detected_within_aggregates() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -655,7 +655,7 @@ fn unsafe_variables_should_be_detected_with_disjunction() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 

@@ -1,89 +1,99 @@
 use tower_lsp::lsp_types::DiagnosticSeverity;
+use tree_sitter::{Range, Node};
 
 use crate::{
     document::DocumentData,
-    treeutils::{humanize_token, retrace},
 };
 
-#[cfg(test)]
-use crate::test_utils::create_test_document;
+use super::{diagnostic_run_data::DiagnosticsRunData, diagnostic_codes::DiagnosticsCode, tree_utils::{humanize_token, EncodingSemantics}};
 
-use super::{diagnostic_run_data::DiagnosticsRunData, error_codes::*};
+pub struct ErrorSemantic {
+    range: Range,
+    prev_sibling_type: String
+}
+
+impl ErrorSemantic {
+    pub fn new(node: &Node) -> ErrorSemantic {
+        ErrorSemantic {
+            range: node.range(),
+            prev_sibling_type: node.prev_sibling().map_or_else(|| "", |n| n.kind()).to_string()
+        }
+    }
+}
+
+pub struct MissingSemantic {
+    range: Range,
+    missing: String 
+}
+
+impl MissingSemantic {
+    pub fn new(range: Range, missing: &str) -> MissingSemantic {
+        MissingSemantic {
+            range,
+            missing: missing.to_string()
+        }
+    }
+}
 
 /**
 * Search for errors in the parse tree.
 */
-pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document: &DocumentData) {
-    let mut cursor = document.tree.walk();
+pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document: &DocumentData, semantics: &EncodingSemantics) {
 
-    let mut reached_root = false;
-    while !reached_root {
-        let node = cursor.node();
-
-        if diagnostic_data.current_number_of_problems >= diagnostic_data.maximum_number_of_problems
-        {
-            return;
-        };
-
-        if node.is_error() {
-            let next = node.prev_sibling();
-            if next.is_some() && next.unwrap().kind() == "statement" {
-                //Found an error which is preceeded by an statement, most likely a . is missing
-                diagnostic_data.create_tree_sitter_diagnostic(
-                    node.range(),
-                    DiagnosticSeverity::ERROR,
-                    EXPECTED_DOT_PARSE_ERROR,
-                    format!(
-                        "syntax error while parsing value: '{}', expected: '.'",
-                        node.utf8_text(document.source.as_bytes()).unwrap()
-                    ),
-                );
-
-                //Don't go deeper into the error node
-                (cursor, reached_root) = retrace(cursor);
-                continue;
-            }
-
-            //If we reach here, we do not have a guess why the error occured
+    //Go through the errors found in the document
+    for error in &semantics.errors {
+        if error.prev_sibling_type == "statement" {
+            //Found an error which is preceeded by an statement, most likely a . is missing
             diagnostic_data.create_tree_sitter_diagnostic(
-                node.range(),
+                error.range,
                 DiagnosticSeverity::ERROR,
-                UNKNOWN_PARSE_ERROR,
+                DiagnosticsCode::ExpectedDot.into_i32(),
                 format!(
-                    "syntax error while parsing value: '{}'",
-                    node.utf8_text(document.source.as_bytes()).unwrap()
+                    "syntax error while parsing value: '{}', expected: '.'",
+                    Some(&document.source[error.range.start_byte..error.range.end_byte]).unwrap()
                 ),
             );
-        } else if node.is_missing() {
-            //If node is missing, tell the user what we expected
-            diagnostic_data.create_tree_sitter_diagnostic(
-                node.range(),
-                DiagnosticSeverity::ERROR,
-                EXPECTED_MISSING_PARSE_ERROR,
-                format!(
-                    "syntax error while parsing, expected: '{}'",
-                    humanize_token(&node.kind().to_string())
-                ),
-            );
-        }
 
-        if cursor.goto_first_child() {
             continue;
         }
+        //If we reach here, we do not have a guess why the error occured
+        diagnostic_data.create_tree_sitter_diagnostic(
+            error.range,
+            DiagnosticSeverity::ERROR,
+            DiagnosticsCode::UnknownParseState.into_i32(),
+            format!(
+                "syntax error while parsing value: '{}'",
+                Some(&document.source[error.range.start_byte..error.range.end_byte]).unwrap()
+            ),
+        );
+    }
 
-        if cursor.goto_next_sibling() {
-            continue;
-        }
-
-        (cursor, reached_root) = retrace(cursor);
+    for missing in &semantics.missing {
+        //If node is missing, tell the user what we expected
+        diagnostic_data.create_tree_sitter_diagnostic(
+            missing.range,
+            DiagnosticSeverity::ERROR,
+            DiagnosticsCode::ExpectedMissingToken.into_i32(),
+            format!(
+                "syntax error while parsing, expected: '{}'",
+                humanize_token(&missing.missing)
+            ),
+        );
     }
 }
+
+#[cfg(test)]
+use crate::{
+    test_utils::create_test_document,
+    diagnostics::analyze_tree
+};
 
 #[test]
 fn unknown_character_should_throw_unknown_parser_error() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
+    let doc = create_test_document("a b.".to_string());
 
-    search_for_tree_error(&mut diags, &create_test_document("a b.".to_string()));
+    search_for_tree_error(&mut diags, &doc, &analyze_tree(&doc.tree));
 
     assert_eq!(diags.total_diagnostics.len(), 1);
 
@@ -98,18 +108,16 @@ fn unknown_character_should_throw_unknown_parser_error() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNKNOWN_PARSE_ERROR)
+        format!("Number({})", DiagnosticsCode::UnknownParseState.into_i32())
     );
 }
 
 #[test]
 fn if_parser_expects_dot_throw_dot_parser_error() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
+    let doc = create_test_document("a. d c :- a.".to_string());
 
-    search_for_tree_error(
-        &mut diags,
-        &create_test_document("a. d c :- a.".to_string()),
-    );
+    search_for_tree_error(&mut diags, &doc, &analyze_tree(&doc.tree));
 
     assert_eq!(diags.total_diagnostics.len(), 1);
 
@@ -124,15 +132,16 @@ fn if_parser_expects_dot_throw_dot_parser_error() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", EXPECTED_DOT_PARSE_ERROR)
+        format!("Number({})", DiagnosticsCode::ExpectedDot.into_i32())
     );
 }
 
 #[test]
 fn if_parser_misses_token_throw_missing_token() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
+    let doc = create_test_document("a(b.".to_string());
 
-    search_for_tree_error(&mut diags, &create_test_document("a(b.".to_string()));
+    search_for_tree_error(&mut diags, &doc, &analyze_tree(&doc.tree));
 
     assert_eq!(diags.total_diagnostics.len(), 1);
 
@@ -147,6 +156,6 @@ fn if_parser_misses_token_throw_missing_token() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", EXPECTED_MISSING_PARSE_ERROR)
+        format!("Number({})", DiagnosticsCode::ExpectedMissingToken.into_i32())
     );
 }
