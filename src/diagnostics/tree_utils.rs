@@ -1,7 +1,7 @@
 use dashmap::DashMap;
-use tree_sitter::{Query, QueryCursor, TreeCursor, Node, Tree, Range};
+use tree_sitter::{Node, Query, QueryCursor, Range, Tree, TreeCursor};
 
-use super::tree_error_analysis::{MissingSemantic, ErrorSemantic};
+use super::tree_error_analysis::{ErrorSemantic, MissingSemantic};
 
 /**
  * Convert a token value into a human readable string
@@ -66,10 +66,11 @@ pub fn do_simple_query<'a>(
 /**
  * Encoding semantics are all the information needed about the program that then can be used by the other parts of the LSP
  */
+#[derive(Clone, Debug)]
 pub struct EncodingSemantics {
     pub errors: Vec<ErrorSemantic>,
     pub missing: Vec<MissingSemantic>,
-    pub terms: DashMap<usize, TermSemantics>
+    pub terms: DashMap<usize, TermSemantics>,
 }
 
 impl EncodingSemantics {
@@ -77,12 +78,12 @@ impl EncodingSemantics {
         EncodingSemantics {
             errors: Vec::new(),
             missing: Vec::new(),
-            terms: DashMap::new()
+            terms: DashMap::new(),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TermSemantics {
     pub operator: TermOperator,
     pub kind: TermType,
@@ -90,25 +91,22 @@ pub struct TermSemantics {
 }
 
 impl TermSemantics {
-    pub fn new (node : &Node, terms: &DashMap<usize, TermSemantics>) -> TermSemantics {
+    pub fn new(node: &Node, terms: &DashMap<usize, TermSemantics>) -> TermSemantics {
         let mut kind = TermType::Unknown;
         let mut operator = TermOperator::None;
 
         match node.kind() {
-            "dec" | "NUMBER" => {
-                kind = TermType::Constant
-            }
-            "VARIABLE" => {
-                kind = TermType::Variable
-            }
-            "identifier" => {
-                kind = TermType::Identifier
-            }
+            "dec" | "NUMBER" => kind = TermType::Constant,
+            "VARIABLE" => kind = TermType::Variable,
+            "identifier" => kind = TermType::Identifier,
             "term" => {
-                if node.child_count() == 1 && terms.contains_key(&node.child(0).unwrap().id()){
-                    kind = terms.get(&node.child(0).unwrap().id()).unwrap().kind.clone();
-                }
-                else if node.child_count() > 2 {
+                if node.child_count() == 1 && terms.contains_key(&node.child(0).unwrap().id()) {
+                    kind = terms
+                        .get(&node.child(0).unwrap().id())
+                        .unwrap()
+                        .kind
+                        .clone();
+                } else if node.child_count() > 2 {
                     match node.child(1).unwrap().kind() {
                         "ADD" => operator = TermOperator::Add,
                         "SUB" => operator = TermOperator::Sub,
@@ -117,23 +115,32 @@ impl TermSemantics {
                         "DOTS" => operator = TermOperator::Dots,
                         "LPAREN" => {
                             kind = TermType::Identifier;
-                            return TermSemantics { operator, kind, range: node.range() };
-                        },
+                            return TermSemantics {
+                                operator,
+                                kind,
+                                range: node.range(),
+                            };
+                        }
                         _ => {}
                     }
                     let left_child = node.child(0).unwrap();
                     let right_child = node.child(2).unwrap();
-                    if terms.contains_key(&left_child.id()) && terms.contains_key(&right_child.id()) {
+                    if terms.contains_key(&left_child.id()) && terms.contains_key(&right_child.id())
+                    {
                         let left_child_sem = terms.get(&left_child.id()).unwrap();
                         let right_child_sem = terms.get(&right_child.id()).unwrap();
-    
-                        if left_child_sem.kind == TermType::Constant && right_child_sem.kind == TermType::Constant {
+
+                        if left_child_sem.kind == TermType::Constant
+                            && right_child_sem.kind == TermType::Constant
+                        {
                             kind = TermType::Constant
-                        }
-                        else if (left_child_sem.kind == TermType::Variable && right_child_sem.kind == TermType::Constant) || (left_child_sem.kind == TermType::Constant && right_child_sem.kind == TermType::Variable) {
+                        } else if (left_child_sem.kind == TermType::Variable
+                            && right_child_sem.kind == TermType::Constant)
+                            || (left_child_sem.kind == TermType::Constant
+                                && right_child_sem.kind == TermType::Variable)
+                        {
                             kind = TermType::Variable
-                        }
-                        else {
+                        } else {
                             kind = TermType::Unknown
                         }
                     }
@@ -141,27 +148,31 @@ impl TermSemantics {
             }
             _ => {}
         }
-        
-        TermSemantics { operator, kind, range: node.range() }
+
+        TermSemantics {
+            operator,
+            kind,
+            range: node.range(),
+        }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TermOperator {
     None,
     Add,
     Sub,
     Mul,
     Slash,
-    Dots
+    Dots,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TermType {
     Unknown,
     Identifier,
     Constant,
-    Variable
+    Variable,
 }
 
 /**
@@ -170,10 +181,9 @@ pub enum TermType {
 pub fn analyze_tree(tree: &Tree) -> EncodingSemantics {
     let mut semantics = EncodingSemantics::new();
     let mut cursor = tree.walk();
-    
+
     let mut reached_root = false;
     while !reached_root {
-
         if cursor.goto_first_child() {
             continue;
         }
@@ -186,7 +196,6 @@ pub fn analyze_tree(tree: &Tree) -> EncodingSemantics {
         }
 
         loop {
-
             on_node(&cursor.node(), &mut semantics);
 
             if !cursor.goto_parent() {
@@ -200,7 +209,7 @@ pub fn analyze_tree(tree: &Tree) -> EncodingSemantics {
                 on_node(&node, &mut semantics);
                 break;
             }
-        };
+        }
     }
 
     semantics
@@ -212,17 +221,21 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics) {
         semantics.errors.push(ErrorSemantic::new(node));
     } else if node.is_missing() {
         // Save where something is missing and what is missing
-        semantics.missing.push(MissingSemantic::new(node.range(), node.kind()));
+        semantics
+            .missing
+            .push(MissingSemantic::new(node.range(), node.kind()));
     }
 
     match node.kind() {
         "dec" | "NUMBER" | "term" | "VARIABLE" | "identifier" => {
-            semantics.terms.insert(node.id(), TermSemantics::new(node, &semantics.terms));
+            semantics
+                .terms
+                .insert(node.id(), TermSemantics::new(node, &semantics.terms));
         }
         "ADD" | "SUB" | "MUL" | "SLASH" | "DOTS" => {
             // If this expression is of the kind where an identifier + ... is used, give a warning to the user that this operation is undefined
             // if node.prev_sibling().map_or_else(|| false, |prev| prev.child_count() > 0 && prev.child(0).map_or_else(|| false, |prev_child| prev_child.kind() == "identifier")) {
-            //    
+            //
             // }
         }
         _ => {}

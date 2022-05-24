@@ -1,36 +1,42 @@
 use tower_lsp::lsp_types::DiagnosticSeverity;
-use tree_sitter::{Range, Node};
+use tree_sitter::{Node, Range};
 
-use crate::{
-    document::DocumentData,
+use crate::document::DocumentData;
+
+use super::{
+    diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData,
+    tree_utils::humanize_token,
 };
 
-use super::{diagnostic_run_data::DiagnosticsRunData, diagnostic_codes::DiagnosticsCode, tree_utils::{humanize_token, EncodingSemantics}};
-
+#[derive(Clone, Debug)]
 pub struct ErrorSemantic {
     range: Range,
-    prev_sibling_type: String
+    prev_sibling_type: String,
 }
 
 impl ErrorSemantic {
     pub fn new(node: &Node) -> ErrorSemantic {
         ErrorSemantic {
             range: node.range(),
-            prev_sibling_type: node.prev_sibling().map_or_else(|| "", |n| n.kind()).to_string()
+            prev_sibling_type: node
+                .prev_sibling()
+                .map_or_else(|| "", |n| n.kind())
+                .to_string(),
         }
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MissingSemantic {
     range: Range,
-    missing: String 
+    missing: String,
 }
 
 impl MissingSemantic {
     pub fn new(range: Range, missing: &str) -> MissingSemantic {
         MissingSemantic {
             range,
-            missing: missing.to_string()
+            missing: missing.to_string(),
         }
     }
 }
@@ -38,10 +44,9 @@ impl MissingSemantic {
 /**
 * Search for errors in the parse tree.
 */
-pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document: &DocumentData, semantics: &EncodingSemantics) {
-
+pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document: &DocumentData) {
     //Go through the errors found in the document
-    for error in &semantics.errors {
+    for error in &document.semantics.errors {
         if error.prev_sibling_type == "statement" {
             //Found an error which is preceeded by an statement, most likely a . is missing
             diagnostic_data.create_tree_sitter_diagnostic(
@@ -68,7 +73,7 @@ pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document:
         );
     }
 
-    for missing in &semantics.missing {
+    for missing in &document.semantics.missing {
         //If node is missing, tell the user what we expected
         diagnostic_data.create_tree_sitter_diagnostic(
             missing.range,
@@ -83,17 +88,14 @@ pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document:
 }
 
 #[cfg(test)]
-use crate::{
-    test_utils::create_test_document,
-    diagnostics::analyze_tree
-};
+use crate::test_utils::create_test_document;
 
 #[test]
 fn unknown_character_should_throw_unknown_parser_error() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
     let doc = create_test_document("a b.".to_string());
 
-    search_for_tree_error(&mut diags, &doc, &analyze_tree(&doc.tree));
+    search_for_tree_error(&mut diags, &doc);
 
     assert_eq!(diags.total_diagnostics.len(), 1);
 
@@ -117,7 +119,7 @@ fn if_parser_expects_dot_throw_dot_parser_error() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
     let doc = create_test_document("a. d c :- a.".to_string());
 
-    search_for_tree_error(&mut diags, &doc, &analyze_tree(&doc.tree));
+    search_for_tree_error(&mut diags, &doc);
 
     assert_eq!(diags.total_diagnostics.len(), 1);
 
@@ -141,7 +143,7 @@ fn if_parser_misses_token_throw_missing_token() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
     let doc = create_test_document("a(b.".to_string());
 
-    search_for_tree_error(&mut diags, &doc, &analyze_tree(&doc.tree));
+    search_for_tree_error(&mut diags, &doc);
 
     assert_eq!(diags.total_diagnostics.len(), 1);
 
@@ -156,6 +158,9 @@ fn if_parser_misses_token_throw_missing_token() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", DiagnosticsCode::ExpectedMissingToken.into_i32())
+        format!(
+            "Number({})",
+            DiagnosticsCode::ExpectedMissingToken.into_i32()
+        )
     );
 }

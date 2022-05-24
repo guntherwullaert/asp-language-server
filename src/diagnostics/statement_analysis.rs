@@ -2,12 +2,14 @@ use dashmap::DashMap;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tree_sitter::{Node, TreeCursor};
 
-use crate::{document::DocumentData};
+use crate::document::DocumentData;
 
 #[cfg(test)]
 use crate::test_utils::create_test_document;
 
-use super::{diagnostic_run_data::DiagnosticsRunData, diagnostic_codes::DiagnosticsCode, tree_utils::retrace};
+use super::{
+    diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::retrace,
+};
 
 /**
  * Walk through the parse tree and analyze the statements

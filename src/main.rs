@@ -157,7 +157,7 @@ impl Backend {
         // Run diagnostics for that file
         run_diagnostics(
             &self.client,
-            &self.document_map.get(&uri.to_string()).unwrap().clone(),
+            &mut self.document_map.get(&uri.to_string()).unwrap().clone(),
             100,
         )
         .await;
