@@ -14,6 +14,6 @@ pub fn create_test_document(source: String) -> DocumentData {
     let tree = parser.parse(source.clone(), None).unwrap();
 
     let mut doc = DocumentData::new(Url::from_str("file://test.lp").unwrap(), tree, source, 1);
-    doc.semantics = analyze_tree(&doc.tree);
+    doc.semantics = analyze_tree(&doc.tree, &doc.source);
     doc
 }

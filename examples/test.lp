@@ -1,3 +1,2 @@
-%provide(p(X;Y)) = provide(X) \cap provide(Y) = {X} \cap {Y} = \emptyset
-%provide(p(X,Y;Y,X)) = provide(X,Y) \cap provide(Y,X) = {X,Y} \cap {Y,X} = {X,Y}
-p :- Y + 10 + (a + 10) = a(X), a(X).
+a(Y) :- b(X), X=Y.
+% TODO: 1. Ignore local vars at first 2. before doing statement check collect all global variables 3. scrub all dependencies of the variables that aren't required for the check

@@ -1,3 +1,4 @@
+use log::info;
 use tower_lsp::Client;
 
 use crate::document::DocumentData;
@@ -31,7 +32,7 @@ pub async fn run_diagnostics(
     };
 
     //Analyze the tree and get all the semantic data out of it
-    document.semantics = analyze_tree(&document.tree);
+    document.semantics = analyze_tree(&document.tree, &document.source);
 
     search_for_tree_error(&mut diagnostic_data, document);
 

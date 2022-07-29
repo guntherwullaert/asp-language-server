@@ -1,14 +1,17 @@
+use std::{collections::HashSet, hash::Hash};
+
 use dashmap::DashMap;
+use log::info;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tree_sitter::{Node, TreeCursor};
 
-use crate::document::DocumentData;
+use crate::{document::DocumentData, diagnostics::tree_utils::SpecialLiteralSemantics};
 
 #[cfg(test)]
 use crate::test_utils::create_test_document;
 
 use super::{
-    diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::retrace,
+    diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::{retrace, EncodingSemantics, do_simple_query},
 };
 
 /**
@@ -29,7 +32,7 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
         };
 
         if node.kind() == "statement" {
-            let empty = &mut Vec::new();
+            /*let empty = &mut Vec::new();
             let (variables, scopes) = get_variables_under_scope(&cursor);
             let (unsafe_vars, safe_vars) =
                 check_nodes_for_safety_under_scope(node, variables, empty, &document.source);
@@ -50,6 +53,14 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
 
                 throw_unsafe_error_for_vars(scoped_unsafe_vars, diagnostic_data);
             }
+
+            diagnostic_data.create_linter_diagnostic(
+                node.range(),
+                DiagnosticSeverity::INFORMATION,
+                DiagnosticsCode::UnsafeVariable.into_i32(),
+                format!("'{:?}' are safe", document.semantics.get_vars_for_node(&node.id())),
+            );*/
+            check_safety_of_statement(&node, &document.semantics, diagnostic_data, document.source.as_bytes());
         }
 
         if cursor.goto_first_child() {
@@ -62,6 +73,123 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
 
         (cursor, reached_root) = retrace(cursor);
     }
+}
+
+/**
+ * Calculates the safe set for a set of dependencies
+ */
+fn calculate_safe_set(dependencies: &mut Vec<(HashSet<String>, HashSet<String>)>, global_vars: &HashSet<String>, global: bool) -> (HashSet<String>, HashSet<String>){
+    let mut dep = dependencies.clone();
+    let mut safe_set : HashSet<String> = HashSet::new();
+    let mut prev_length = 0;
+    let mut vars_in_dependency : HashSet<String> = HashSet::new();
+
+    // First collect all variables contained in dep
+    for (provide, depend) in &dep {
+        vars_in_dependency = vars_in_dependency.union(provide).cloned().collect::<HashSet<String>>().union(depend).cloned().collect::<HashSet<String>>();
+    }
+
+    //If we are not in a global context, change dependencies according to vars \ G
+    if !global {
+        dep = get_dependencies_only_occuring_in_set(&dep, vars_in_dependency.difference(global_vars).cloned().collect());
+        info!("Variables only occuring in local context: {:?}", vars_in_dependency.difference(global_vars).cloned().collect::<HashSet<String>>());
+    }
+
+    loop {
+        info!("Starting new round of safety checking with dep: {:?}", dep);
+
+        // Have a mutable reference for closure
+        let safe_set_ref = &mut safe_set;
+
+        // Go through the dependencies list and find any elements we have all dependencies for
+        dep.retain(|(provide, depend)| {
+            // If all dependencies are in our safe set, then the dependency requirements are met
+            if depend.is_subset(safe_set_ref) {
+                info!("Found a tuple that has all the dependencies provided: ({:?}, {:?}) with safety ({:?})", provide, depend, safe_set_ref);
+                // Everything that is provided is thus also safe
+                safe_set_ref.extend(provide.iter().cloned());
+
+                // Remove this dependency from the dependencies list
+                return false;
+            }
+            else {
+                info!("Passing tuple ({:?}, {:?}) as not all dependencies are provided: {:?}", provide, depend, safe_set_ref);
+            }
+            
+            true
+        });
+
+        // Stop checking once we cannot find anything that we can use
+        if dep.len() == prev_length  { break; }
+        prev_length = dep.len()
+    }
+
+    (safe_set, vars_in_dependency)
+}
+
+fn get_dependencies_only_occuring_in_set(dependencies: & Vec<(HashSet<String>, HashSet<String>)>, set: HashSet<String>) -> Vec<(HashSet<String>, HashSet<String>)>{
+    let mut new_dependencies = Vec::new();
+
+    for (provide, depend) in dependencies {
+        let pt = provide.intersection(&set).cloned().collect::<HashSet<String>>();
+        let dt = depend.intersection(&set).cloned().collect::<HashSet<String>>();
+        if !pt.is_empty() || !dt.is_empty() {
+            new_dependencies.push((pt, dt));
+        }
+    }
+
+    new_dependencies
+}
+
+/**
+ * Check if a statement is safe
+ */
+fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagnostics: &mut DiagnosticsRunData, source: &[u8]) {
+    let mut dep = semantics.get_dependency_for_node(&node.id());
+
+    info!("Starting safety check of statement with dependencies: {:?}", dep);
+
+    // Find all global variables
+    let global_vars = semantics.get_global_vars_for_node(&node.id());
+    info!("Found global variables: {:?}", global_vars);
+
+    let (global_safe_set, vars_in_dependency) = calculate_safe_set(&mut get_dependencies_only_occuring_in_set(&dep, global_vars.clone()), &global_vars, true);
+
+    let mut local_unsafe_sets: Vec<(SpecialLiteralSemantics, HashSet<String>)> = Vec::new();
+
+    //Calculate for local contexts
+    for literal in semantics.get_special_literals_for_node(&node.id()) {
+        info!("Checking safety for literal: {:?}", literal);
+        let (local_safe_set, local_vars_in_dependency) = calculate_safe_set(&mut literal.local_dependency.clone(), &global_vars, false);
+
+        let unsafe_vars : HashSet<String> = local_vars_in_dependency.difference(&local_safe_set).cloned().collect();
+        local_unsafe_sets.push((literal, unsafe_vars.difference(&vars_in_dependency).cloned().collect()));
+        info!("Found this unsafe set: {:?}", local_unsafe_sets.last().unwrap().1);
+    }
+
+    let mut unsafe_set: HashSet<String> = vars_in_dependency.difference(&global_safe_set).cloned().collect();
+
+    for (literal, set) in local_unsafe_sets {
+        let variable_locations = literal.variable_locations;
+        for unsafe_var in set.iter() {
+            for (range, name) in &variable_locations {
+                if unsafe_var == name {
+                    diagnostics.create_linter_diagnostic(*range, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
+                }
+            }
+        }
+    }
+    
+    info!("Found this global unsafe set: {:?}", unsafe_set);
+    let variable_locations = do_simple_query("(VARIABLE) @name", node, source);
+    for unsafe_var in unsafe_set.iter() {
+        for (range, name, _) in &variable_locations {
+            if unsafe_var == name {
+                diagnostics.create_linter_diagnostic(*range, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
+            }
+        }
+    }
+
 }
 
 /**
