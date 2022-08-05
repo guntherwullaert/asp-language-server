@@ -3,7 +3,7 @@ use std::str::FromStr;
 use tower_lsp::lsp_types::Url;
 use tree_sitter::Parser;
 
-use crate::document::DocumentData;
+use crate::{diagnostics::tree_utils::analyze_tree, document::DocumentData};
 
 pub fn create_test_document(source: String) -> DocumentData {
     let mut parser = Parser::new();
@@ -13,5 +13,7 @@ pub fn create_test_document(source: String) -> DocumentData {
 
     let tree = parser.parse(source.clone(), None).unwrap();
 
-    DocumentData::new(Url::from_str("file://test.lp").unwrap(), tree, source, 1)
+    let mut doc = DocumentData::new(Url::from_str("file://test.lp").unwrap(), tree, source, 1);
+    doc.semantics = analyze_tree(&doc.tree, &doc.source);
+    doc
 }

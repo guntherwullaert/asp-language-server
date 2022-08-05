@@ -11,7 +11,6 @@ use tree_sitter::Parser;
 
 mod diagnostics;
 mod document;
-mod treeutils;
 
 #[cfg(test)]
 mod test_utils;
@@ -158,7 +157,7 @@ impl Backend {
         // Run diagnostics for that file
         run_diagnostics(
             &self.client,
-            &self.document_map.get(&uri.to_string()).unwrap(),
+            &mut self.document_map.get(&uri.to_string()).unwrap().clone(),
             100,
         )
         .await;

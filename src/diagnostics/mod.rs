@@ -1,23 +1,27 @@
+use log::info;
 use tower_lsp::Client;
 
 use crate::document::DocumentData;
 
 use self::{
-    diagnostic_run_data::DiagnosticsRunData, statement_analysis::statement_analysis,
-    tree_error_analysis::search_for_tree_error,
+    diagnostic_run_data::DiagnosticsRunData, expression_analysis::analyze_expressions,
+    statement_analysis::statement_analysis, tree_error_analysis::search_for_tree_error,
+    tree_utils::analyze_tree,
 };
 
+mod diagnostic_codes;
 mod diagnostic_run_data;
-mod error_codes;
+mod expression_analysis;
 mod statement_analysis;
 mod tree_error_analysis;
+pub mod tree_utils;
 
 /**
  * Run the selected diagnostics on the parse tree
  */
 pub async fn run_diagnostics(
     client: &Client,
-    document: &DocumentData,
+    document: &mut DocumentData,
     maximum_number_of_problems: u32,
 ) {
     //Setup the diagnostics run data object to be used for this diagnostics run
@@ -27,7 +31,12 @@ pub async fn run_diagnostics(
         total_diagnostics: Vec::new(),
     };
 
+    //Analyze the tree and get all the semantic data out of it
+    document.semantics = analyze_tree(&document.tree, &document.source);
+
     search_for_tree_error(&mut diagnostic_data, document);
+
+    analyze_expressions(&mut diagnostic_data, document);
 
     statement_analysis(&mut diagnostic_data, document);
 

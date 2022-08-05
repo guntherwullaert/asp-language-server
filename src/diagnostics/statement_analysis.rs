@@ -1,13 +1,18 @@
+use std::{collections::HashSet, hash::Hash};
+
 use dashmap::DashMap;
+use log::info;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tree_sitter::{Node, TreeCursor};
 
-use crate::{document::DocumentData, treeutils::retrace};
+use crate::{document::DocumentData, diagnostics::tree_utils::SpecialLiteralSemantics};
 
 #[cfg(test)]
 use crate::test_utils::create_test_document;
 
-use super::{diagnostic_run_data::DiagnosticsRunData, error_codes::*};
+use super::{
+    diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::{retrace, EncodingSemantics, do_simple_query},
+};
 
 /**
  * Walk through the parse tree and analyze the statements
@@ -27,7 +32,7 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
         };
 
         if node.kind() == "statement" {
-            let empty = &mut Vec::new();
+            /*let empty = &mut Vec::new();
             let (variables, scopes) = get_variables_under_scope(&cursor);
             let (unsafe_vars, safe_vars) =
                 check_nodes_for_safety_under_scope(node, variables, empty, &document.source);
@@ -48,6 +53,14 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
 
                 throw_unsafe_error_for_vars(scoped_unsafe_vars, diagnostic_data);
             }
+
+            diagnostic_data.create_linter_diagnostic(
+                node.range(),
+                DiagnosticSeverity::INFORMATION,
+                DiagnosticsCode::UnsafeVariable.into_i32(),
+                format!("'{:?}' are safe", document.semantics.get_vars_for_node(&node.id())),
+            );*/
+            check_safety_of_statement(&node, &document.semantics, diagnostic_data, document.source.as_bytes());
         }
 
         if cursor.goto_first_child() {
@@ -60,6 +73,123 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
 
         (cursor, reached_root) = retrace(cursor);
     }
+}
+
+/**
+ * Calculates the safe set for a set of dependencies
+ */
+fn calculate_safe_set(dependencies: &mut Vec<(HashSet<String>, HashSet<String>)>, global_vars: &HashSet<String>, global: bool) -> (HashSet<String>, HashSet<String>){
+    let mut dep = dependencies.clone();
+    let mut safe_set : HashSet<String> = HashSet::new();
+    let mut prev_length = 0;
+    let mut vars_in_dependency : HashSet<String> = HashSet::new();
+
+    // First collect all variables contained in dep
+    for (provide, depend) in &dep {
+        vars_in_dependency = vars_in_dependency.union(provide).cloned().collect::<HashSet<String>>().union(depend).cloned().collect::<HashSet<String>>();
+    }
+
+    //If we are not in a global context, change dependencies according to vars \ G
+    if !global {
+        dep = get_dependencies_only_occuring_in_set(&dep, vars_in_dependency.difference(global_vars).cloned().collect());
+        info!("Variables only occuring in local context: {:?}", vars_in_dependency.difference(global_vars).cloned().collect::<HashSet<String>>());
+    }
+
+    loop {
+        info!("Starting new round of safety checking with dep: {:?}", dep);
+
+        // Have a mutable reference for closure
+        let safe_set_ref = &mut safe_set;
+
+        // Go through the dependencies list and find any elements we have all dependencies for
+        dep.retain(|(provide, depend)| {
+            // If all dependencies are in our safe set, then the dependency requirements are met
+            if depend.is_subset(safe_set_ref) {
+                info!("Found a tuple that has all the dependencies provided: ({:?}, {:?}) with safety ({:?})", provide, depend, safe_set_ref);
+                // Everything that is provided is thus also safe
+                safe_set_ref.extend(provide.iter().cloned());
+
+                // Remove this dependency from the dependencies list
+                return false;
+            }
+            else {
+                info!("Passing tuple ({:?}, {:?}) as not all dependencies are provided: {:?}", provide, depend, safe_set_ref);
+            }
+            
+            true
+        });
+
+        // Stop checking once we cannot find anything that we can use
+        if dep.len() == prev_length  { break; }
+        prev_length = dep.len()
+    }
+
+    (safe_set, vars_in_dependency)
+}
+
+fn get_dependencies_only_occuring_in_set(dependencies: & Vec<(HashSet<String>, HashSet<String>)>, set: HashSet<String>) -> Vec<(HashSet<String>, HashSet<String>)>{
+    let mut new_dependencies = Vec::new();
+
+    for (provide, depend) in dependencies {
+        let pt = provide.intersection(&set).cloned().collect::<HashSet<String>>();
+        let dt = depend.intersection(&set).cloned().collect::<HashSet<String>>();
+        if !pt.is_empty() || !dt.is_empty() {
+            new_dependencies.push((pt, dt));
+        }
+    }
+
+    new_dependencies
+}
+
+/**
+ * Check if a statement is safe
+ */
+fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagnostics: &mut DiagnosticsRunData, source: &[u8]) {
+    let mut dep = semantics.get_dependency_for_node(&node.id());
+
+    info!("Starting safety check of statement with dependencies: {:?}", dep);
+
+    // Find all global variables
+    let global_vars = semantics.get_global_vars_for_node(&node.id());
+    info!("Found global variables: {:?}", global_vars);
+
+    let (global_safe_set, vars_in_dependency) = calculate_safe_set(&mut get_dependencies_only_occuring_in_set(&dep, global_vars.clone()), &global_vars, true);
+
+    let mut local_unsafe_sets: Vec<(SpecialLiteralSemantics, HashSet<String>)> = Vec::new();
+
+    //Calculate for local contexts
+    for literal in semantics.get_special_literals_for_node(&node.id()) {
+        info!("Checking safety for literal: {:?}", literal);
+        let (local_safe_set, local_vars_in_dependency) = calculate_safe_set(&mut literal.local_dependency.clone(), &global_vars, false);
+
+        let unsafe_vars : HashSet<String> = local_vars_in_dependency.difference(&local_safe_set).cloned().collect();
+        local_unsafe_sets.push((literal, unsafe_vars.difference(&vars_in_dependency).cloned().collect()));
+        info!("Found this unsafe set: {:?}", local_unsafe_sets.last().unwrap().1);
+    }
+
+    let mut unsafe_set: HashSet<String> = vars_in_dependency.difference(&global_safe_set).cloned().collect();
+
+    for (literal, set) in local_unsafe_sets {
+        let variable_locations = literal.variable_locations;
+        for unsafe_var in set.iter() {
+            for (range, name) in &variable_locations {
+                if unsafe_var == name {
+                    diagnostics.create_linter_diagnostic(*range, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
+                }
+            }
+        }
+    }
+    
+    info!("Found this global unsafe set: {:?}", unsafe_set);
+    let variable_locations = do_simple_query("(VARIABLE) @name", node, source);
+    for unsafe_var in unsafe_set.iter() {
+        for (range, name, _) in &variable_locations {
+            if unsafe_var == name {
+                diagnostics.create_linter_diagnostic(*range, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
+            }
+        }
+    }
+
 }
 
 /**
@@ -227,11 +357,20 @@ fn throw_unsafe_error_for_vars(
             diagnostic_data.create_linter_diagnostic(
                 *range,
                 DiagnosticSeverity::ERROR,
-                UNSAFE_VARIABLE,
+                DiagnosticsCode::UnsafeVariable.into_i32(),
                 format!("'{}' is unsafe", var.key()),
             );
         }
     }
+}
+
+#[test]
+fn no_variables_should_be_detected_as_safe() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(&mut diags, &create_test_document("a :- b.".to_string()));
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
 }
 
 #[test]
@@ -253,7 +392,7 @@ fn unsafe_variables_should_be_detected_no_body() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -276,7 +415,7 @@ fn unsafe_variables_should_be_detected_no_variables_in_body() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -314,7 +453,7 @@ fn safeness_should_be_blocked_by_not() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -340,7 +479,7 @@ fn safeness_should_be_blocked_by_multiple_nots() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -369,6 +508,44 @@ fn safeness_should_not_be_blocked_by_not_in_head() {
 }
 
 #[test]
+fn safeness_should_work_with_integrity_constraints() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(":- b(X).".to_string()),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafeness_should_work_with_integrity_constraints() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(":- b(X), c(X+Y).".to_string()),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 1);
+
+    assert_eq!(
+        format!(
+            "{:?}",
+            diags
+                .total_diagnostics
+                .get(0)
+                .unwrap()
+                .code
+                .clone()
+                .unwrap()
+        ),
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
+    );
+}
+
+#[test]
 fn unsafe_variables_should_be_detected_in_choice_rule_with_no_body() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
 
@@ -387,7 +564,7 @@ fn unsafe_variables_should_be_detected_in_choice_rule_with_no_body() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -425,7 +602,7 @@ fn unsafe_variables_should_be_detected_in_choice_rule() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -450,7 +627,7 @@ fn unsafe_variables_should_be_detected_in_conjunctions() {
         &create_test_document("{a(X)} :- a : b(X).".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 1);
+    assert_eq!(diags.total_diagnostics.len(), 2);
 
     assert_eq!(
         format!(
@@ -463,12 +640,12 @@ fn unsafe_variables_should_be_detected_in_conjunctions() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
 #[test]
-fn safeness_should_be_detected_in_conjunctions() {
+fn safeness_should_be_detected_in_conjunctions_with_pure_variables() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
 
     statement_analysis(
@@ -501,7 +678,7 @@ fn unsafe_variables_should_be_detected_in_conjunctions_with_not() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -527,7 +704,7 @@ fn unsafe_variables_should_be_detected_in_show() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -552,7 +729,7 @@ fn unsafe_variables_should_be_detected_with_aggregates() {
         &create_test_document("a(X) :- N = #count{X : b(X)}.".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 1);
+    assert_eq!(diags.total_diagnostics.len(), 3);
 
     assert_eq!(
         format!(
@@ -565,7 +742,7 @@ fn unsafe_variables_should_be_detected_with_aggregates() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -591,7 +768,7 @@ fn unsafe_variables_should_be_detected_with_aggregates_and_disjunction() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -629,7 +806,7 @@ fn unsafe_variables_should_be_detected_within_aggregates() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -655,7 +832,7 @@ fn unsafe_variables_should_be_detected_with_disjunction() {
                 .clone()
                 .unwrap()
         ),
-        format!("Number({})", UNSAFE_VARIABLE)
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
     );
 }
 
@@ -677,11 +854,24 @@ fn unsafe_variables_should_be_detected_with_comparison() {
 
     statement_analysis(
         &mut diags,
-        &create_test_document(":- X1=X2, Y0=Y1..Y2, Z0=(Z1;Z2).".to_string()),
+        &create_test_document("a(Y) :- X=Y.".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 8);
+    assert_eq!(diags.total_diagnostics.len(), 3);
 }
+
+#[test]
+fn safe_variables_should_be_detected_with_comparison_indirectly() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document("a(Y) :- a(X), X=Y.".to_string()),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
 
 #[test]
 fn unsafe_variables_should_be_detected_with_multiple_statements_correctly() {
@@ -690,12 +880,100 @@ fn unsafe_variables_should_be_detected_with_multiple_statements_correctly() {
     statement_analysis(
         &mut diags,
         &create_test_document(
-            "a(X) :- N = #count{X : b(X)}.
-    a(N), c(X) :- N = #count{X : b(X)}.
-    :- X1=X2, Y0=Y1..Y2, Z0=(Z1;Z2)."
+            "a(X) :- b(Y). c(X) :- d(X). a(Y), b(Z) :- a(X), X=Y, Y=Z. c(X,Y) :- a(Z, Y)."
                 .to_string(),
         ),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 10);
+    assert_eq!(diags.total_diagnostics.len(), 2);
+}
+
+#[test]
+fn safe_variables_should_be_detected_with_pools() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X;X)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafe_variables_should_be_detected_with_pools() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X;Y)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafe_variables_should_be_detected_with_aritmethics() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X,Y) :- a(X+Y, X)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 2);
+}
+
+#[test]
+fn constant_should_safe_equation() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X+1)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn constant_cannot_safe_multiplication_if_zero() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X*0)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 2);
+}
+
+#[test]
+fn negated_not_equals_should_be_handled_as_equals() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(Y), not Y != X."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
 }
