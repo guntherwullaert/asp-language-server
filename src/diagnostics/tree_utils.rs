@@ -73,7 +73,8 @@ pub fn do_simple_query<'a>(
 pub enum LiteralType {
     Normal,
     Conjunction,
-    AggregateElement
+    AggregateElement,
+    Disjunction
 }
 
 /**
@@ -92,7 +93,7 @@ impl SpecialLiteralSemantics {
         let mut local_dependency: Vec<(HashSet<String>, HashSet<String>)> = Vec::new();
 
         match node.kind() {
-            "conjunction" =>  {
+            "conjunction" | "disjunction" =>  {
                 if node.child_count() == 3 {
                     let l0 = node.child(0).unwrap();
                     let condition = node.child(2).unwrap();
@@ -112,7 +113,7 @@ impl SpecialLiteralSemantics {
                     info!("Body Aggregate Element terms: {:?}, condition: {:?}", semantics.get_vars_for_node(&terms.id()), semantics.get_dependency_for_node(&condition.id()));
                     info!("Body Aggregate Element litvec: {:?}", semantics.get_dependency_for_node(&condition.child(1).unwrap().id()));
                 }
-            }
+            },
             _ => {}
         }
         
@@ -128,6 +129,31 @@ impl SpecialLiteralSemantics {
             kind: match node.kind() {
                 "conjunction" => LiteralType::Conjunction,
                 "bodyaggrelem" => LiteralType::AggregateElement,
+                "altheadaggrelemvec" => LiteralType::AggregateElement,
+                "disjunction" => LiteralType::Disjunction,
+                _ => LiteralType::Normal
+            },
+            local_dependency,
+            variable_locations 
+        }
+    }
+
+    pub fn new_with_dep (node: &Node, local_dependency: Vec<(HashSet<String>, HashSet<String>)>, source: &[u8]) -> SpecialLiteralSemantics {
+
+        //Find local variable locations
+        let local_vars = do_simple_query("(VARIABLE) @name", node, source, );
+        let mut variable_locations = Vec::new();
+        for (range, string, _) in local_vars {
+            variable_locations.push((range, string.to_string()));
+        }
+
+        SpecialLiteralSemantics {
+            id: node.id(),
+            kind: match node.kind() {
+                "conjunction" => LiteralType::Conjunction,
+                "bodyaggrelem" => LiteralType::AggregateElement,
+                "altheadaggrelemvec" => LiteralType::AggregateElement,
+                "disjunction" => LiteralType::Disjunction,
                 _ => LiteralType::Normal
             },
             local_dependency,
@@ -600,9 +626,7 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
             // If we only have 1 child we pass on the depend for the child
             if node.child_count() == 1 {
                 let child = node.child(0).unwrap();
-                semantics.depend.insert(node.id(), semantics.get_depend_for_node(&child.id()).clone());
-
-                info!("Argvec {:?} -- depend: {:?}", node.utf8_text(source.as_bytes()), semantics.get_depend_for_node(&child.id()).clone());
+                semantics.depend.insert(node.id(), semantics.get_depend_for_node(&child.id()));
             } else if node.child_count() == 3{
                 // If we have a argvec with a semicolon we have a pool
                 let semicolon = node.child(1).unwrap();
@@ -675,10 +699,47 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
                 let head = node.child(0).unwrap();
                 let mut dependencies = vec![(HashSet::new(), semantics.get_vars_for_node(&head.id()))];
 
-                // If there is a body then we add the dependencies from each literal
-                if node.child_count() >= 3 {
-                    let body = node.child(2).unwrap();
+                if (head.kind() == "SHOW" || head.kind() == "EXTERNAL") && node.child_count() >= 2{
+                    // We have a show statement
+                    let term = node.child(1).unwrap();
+
+                    // Set variables in the term to dependency
+                    dependencies.push((HashSet::new(), semantics.get_vars_for_node(&term.id())));
+
+                    // Also register variables in this term as that is not handled due to it not being a literal
+                    semantics.global_vars.insert(term.id(), semantics.get_vars_for_node(&term.id()));
+
+                    if node.child_count() >= 4 {
+                        // We have a colon and bodydot after the show statement
+                        let body = node.child(3).unwrap();
+                        if node.child(2).unwrap().kind() == "COLON" && body.kind() == "bodydot" {
+                            dependencies.extend(semantics.dependency.get(&body.id()).unwrap().iter().cloned())
+                        }
+                    }
+                }
+                else if (head.kind() == "IF" || head.kind() == "WIF") && node.child_count() >= 2{
+                    let body = node.child(1).unwrap();
                     if body.kind() == "bodydot" {
+                        dependencies.extend(semantics.dependency.get(&body.id()).unwrap().iter().cloned())
+                    }
+                    
+                    //If we have a weak constraint we need to handle the weight and tuple
+                    if head.kind() == "WIF" {
+                        let weight = node.child(3).unwrap();
+
+                        dependencies.push((HashSet::new(), semantics.get_vars_for_node(&weight.id())));
+                        semantics.global_vars.insert(weight.id(), semantics.get_vars_for_node(&weight.id()));
+                        
+                        if node.child_count() >= 5 {
+                            let tuple = node.child(4).unwrap();
+                            dependencies.push((HashSet::new(), semantics.get_vars_for_node(&tuple.id())));
+                            semantics.global_vars.insert(tuple.id(), semantics.get_vars_for_node(&tuple.id()));
+                        }
+                    }
+                }
+                else if node.child_count() >= 3 {
+                    let body = node.child(2).unwrap();
+                    if body.kind() == "bodydot" || body.kind() == "maxelemlist" || body.kind() == "minelemlist" {
                         dependencies.extend(semantics.dependency.get(&body.id()).unwrap().iter().cloned())
                     }
                 }
@@ -709,57 +770,56 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
                 //If we have one child pass on the dependency from the atom
                 let atom = node.child(0).unwrap();
                 semantics.dependency.insert(node.id(), semantics.get_dependency_for_node(&atom.id()));
-            }
-            else if node.child_count() == 2 {
-                //We have a not in front of the atom
-                let not = node.child(0).unwrap();
-                let atom = node.child(1).unwrap();
-                let mut dep = Vec::new();
+            }else if node.child_count() > 1 {
+                let mut atom_id = 0;
 
-                if not.kind() == "NOT" {
-                    dep.push((HashSet::new(), semantics.get_vars_for_node(&atom.id())));
+                // Find out where the atom starts without NOT
+                for child_id in 0 .. node.child_count() {
+                    if node.child(child_id).unwrap().kind() != "NOT" {
+                        atom_id = child_id;
+                        break;
+                    }
+                }
 
+                let atom = node.child(atom_id).unwrap();
+                
+                //If we have a comparison
+                if node.child_count() >= 3 && atom_id <= node.child_count() - 3 {
+                    let operator = node.child(atom_id + 1).unwrap();
+                    let right_atom = node.child(atom_id + 2).unwrap();
+
+                    match operator.kind() {
+                        "cmp" => {
+                            
+                            // We have an comparison literal, set all variables to a dependency
+                            let mut dep = Vec::new();
+                            let vars: HashSet<String> = semantics.get_vars_for_node(&atom.id()).union(&semantics.get_vars_for_node(&right_atom.id())).cloned().collect();
+                            let mut comparison = operator.child(0).unwrap_or(operator).kind();
+                            if(node.child_count() == 4) {
+                                comparison = negate_comparison_operator(comparison);
+                            }
+    
+                            // If the comparison is not an assignment
+                            if comparison != "EQ" {
+                                dep.push((HashSet::new(), vars));
+                            } else {
+                                // (pt(t1), vars(t2))
+                                dep.push((semantics.get_provide_for_node(&atom.id()), semantics.get_vars_for_node(&right_atom.id())));
+                                // (pt(t2), vars(t1))
+                                dep.push((semantics.get_provide_for_node(&right_atom.id()), semantics.get_vars_for_node(&atom.id())));
+                                // (∅, dt(t1) ∪ dt(t2))
+                                dep.push((HashSet::new(), semantics.get_depend_for_node(&atom.id()).union(&semantics.get_depend_for_node(&right_atom.id())).cloned().collect()));
+                            }
+    
+                            semantics.dependency.insert(node.id(), dep);
+                        }
+                        _ => {
+                            semantics.dependency.insert(node.id(), Vec::new());
+                        }
+                    }
+                } else {
+                    let mut dep = vec![(HashSet::new(), semantics.get_vars_for_node(&atom.id()))];
                     semantics.dependency.insert(node.id(), dep);
-                }
-            }
-            else if node.child_count() >= 3{
-                let mut left_child = node.child(0).unwrap();
-                let mut operator = node.child(1).unwrap();
-                let mut right_child = node.child(2).unwrap();
-                if node.child_count() == 4 && left_child.kind() == "NOT" {
-                    left_child = node.child(1).unwrap();
-                    operator = node.child(2).unwrap();
-                    right_child = node.child(3).unwrap();
-                }
-
-                match operator.kind() {
-                    "cmp" => {
-                        
-                        // We have an comparison literal, set all variables to a dependency
-                        let mut dep = Vec::new();
-                        let vars: HashSet<String> = semantics.get_vars_for_node(&left_child.id()).union(&semantics.get_vars_for_node(&right_child.id())).cloned().collect();
-                        let mut comparison = operator.child(0).unwrap_or(operator).kind();
-                        if(node.child_count() == 4) {
-                            comparison = negate_comparison_operator(comparison);
-                        }
-
-                        // If the comparison is not an assignment
-                        if comparison != "EQ" {
-                            dep.push((HashSet::new(), vars));
-                        } else {
-                            // (pt(t1), vars(t2))
-                            dep.push((semantics.get_provide_for_node(&left_child.id()), semantics.get_vars_for_node(&right_child.id())));
-                            // (pt(t2), vars(t1))
-                            dep.push((semantics.get_provide_for_node(&right_child.id()), semantics.get_vars_for_node(&left_child.id())));
-                            // (∅, dt(t1) ∪ dt(t2))
-                            dep.push((HashSet::new(), semantics.get_depend_for_node(&left_child.id()).union(&semantics.get_depend_for_node(&right_child.id())).cloned().collect()));
-                        }
-
-                        semantics.dependency.insert(node.id(), dep);
-                    }
-                    _ => {
-                        semantics.dependency.insert(node.id(), Vec::new());
-                    }
                 }
             }
         }
@@ -819,7 +879,7 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
                 semantics.dependency.insert(node.id(), Vec::new());
             }
         }
-        "litvec" | "optcondition" => {
+        "litvec" | "optcondition" | "optimizelitvec" | "optimizecond" => {
             let mut dependencies : Vec<(HashSet<String>, HashSet<String>)> = Vec::new();
 
             for child_id in 0 .. node.child_count() {
@@ -832,6 +892,8 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
                     }
                 }
             }
+
+            info!("found litvec or optcondition with dependencies: {:?}", dependencies);
 
             semantics.dependency.insert(node.id(), dependencies);
         }
@@ -908,12 +970,144 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
                 semantics.global_vars.insert(node.id(), global_vars);
             }
         }
+        "altheadaggrelemvec" => {
+            let mut global_vars = HashSet::new();
+
+            if node.child_count() == 1 {
+                let child = node.child(0).unwrap();
+
+                global_vars = global_vars.union(&semantics.get_vars_for_node(&child.id())).cloned().collect::<HashSet<String>>();
+                semantics.global_vars.insert(node.id(), global_vars);
+                
+                //pass on all the dependencies from the child
+                semantics.special_literals.insert(node.id(), semantics.get_special_literals_for_node(&child.id()));
+            } else if node.child_count() == 2 {
+                let terms = node.child(0).unwrap();
+                let condition = node.child(1).unwrap();
+                let mut local_dependency = Vec::new();
+
+                // if there is an condition only pass on the variables which are not in the condition
+                let vars : HashSet<String> = semantics.get_vars_for_node(&terms.id()).difference(&semantics.get_vars_for_node(&condition.id())).cloned().collect();
+                global_vars.extend(vars);
+
+                // find out the local dependencies
+                local_dependency.push((HashSet::new(), semantics.get_vars_for_node(&terms.id())));
+                local_dependency.extend(semantics.get_dependency_for_node(&condition.id()));
+
+                info!("Local Dependencies of head aggregate of size 2: {:?}, condition: {:?}, global_vars: {:?}", local_dependency, semantics.get_dependency_for_node(&condition.id()), global_vars);
+
+                //update the special literal semantics
+                semantics.special_literals.insert(node.id(), vec![SpecialLiteralSemantics::new_with_dep(node, local_dependency, source.as_bytes())]);
+
+
+            } else if node.child_count() >= 3 {
+                let left_child = node.child(0).unwrap();
+                let operator = node.child(1).unwrap();
+                let right_child = node.child(2).unwrap();
+
+                if operator.kind() != "SEM" {
+                    return;
+                }
+
+                // pass on everything from the left child
+                global_vars = global_vars.union(&semantics.get_global_vars_for_node(&left_child.id())).cloned().collect::<HashSet<String>>();
+                let mut special_literals = semantics.get_special_literals_for_node(&left_child.id());
+
+                
+                if node.child_count() >= 4 {
+                    let condition = node.child(3).unwrap();
+                    let mut local_dependency = Vec::new();
+
+                    // if there is an condition only pass on the variables which are not in the condition
+                    let vars : HashSet<String> = semantics.get_vars_for_node(&right_child.id()).difference(&semantics.get_vars_for_node(&condition.id())).cloned().collect();
+                    global_vars.extend(vars);
+
+                    // find out the local dependencies
+                    local_dependency.push((HashSet::new(), semantics.get_vars_for_node(&right_child.id())));
+                    local_dependency.extend(semantics.get_dependency_for_node(&condition.id()));
+
+                    
+                    info!("Local Dependencies of head aggregate of size 3: {:?}, condition: {:?}, global_vars: {:?}", local_dependency, special_literals, global_vars);
+
+                    //update the special literal semantics
+                    special_literals.push(SpecialLiteralSemantics::new_with_dep(node, local_dependency, source.as_bytes()));
+                } else {
+                    // pass on everything from the right child if there is no condition
+                    global_vars = global_vars.union(&semantics.get_vars_for_node(&right_child.id())).cloned().collect::<HashSet<String>>();
+
+                    //pass on all the dependencies from both children
+                    let mut special_literals = semantics.get_special_literals_for_node(&left_child.id());
+                    special_literals.extend(semantics.get_special_literals_for_node(&right_child.id()));
+
+                    info!(" head aggregate of size 3 special literals: {:?}, global_vars: {:?}", special_literals, global_vars);
+                }
+
+                semantics.global_vars.insert(node.id(), global_vars);
+                semantics.special_literals.insert(node.id(), special_literals);
+            } 
+        }
+        "disjunction" => {
+            // We have a disjunction in the head
+            let vars = semantics.get_vars_for_node(&node.id());
+            let dep = vec![(HashSet::new(), vars)];
+            let mut offset = 0;
+
+            if node.child_count() >= 1 {
+                let disjunctionsep = node.child(0).unwrap();
+
+                if disjunctionsep.kind() == "disjunctionsep" {
+                    offset += 1;
+                }
+            }
+
+            if node.child_count() >= 3 { // literal -- colon -- litvec
+                let local_literal = node.child(offset).unwrap();
+                let condition = node.child(2).unwrap();
+
+                // for the global context we return all variables that are not in the local context
+                semantics.global_vars.insert(node.id(), semantics.get_vars_for_node(&local_literal.id()).difference(&semantics.get_vars_for_node(&condition.id())).cloned().collect());
+            }
+
+            semantics.dependency.insert(node.id(), dep);
+        }
+        "minelemlist" | "maxelemlist" => {
+            let mut dependencies = Vec::new();
+
+            // we have an optimization statement
+            if node.child_count() >= 2 {
+                let weight = node.child(0).unwrap();
+                let condition;
+                if node.child_count() >= 3 {
+                    let tuple = node.child(1).unwrap();
+                    condition = node.child(2).unwrap();
+
+                    //Add all variables in the tuple to the dependency list
+                    dependencies.push((HashSet::new(), semantics.get_vars_for_node(&tuple.id())));
+
+                    //Add all variables in the tuple to the global variables list
+                    semantics.global_vars.insert(tuple.id(), semantics.get_vars_for_node(&tuple.id()));
+                } else {
+                    condition = node.child(1).unwrap();
+                }
+
+                //Add all variables in the weight to the global variables list
+                semantics.global_vars.insert(weight.id(), semantics.get_vars_for_node(&weight.id()));
+
+                //Add all variables in the weight to the dependency list
+                dependencies.push((HashSet::new(), semantics.get_vars_for_node(&weight.id())));
+
+                //Take all the dependencies from the condition
+                dependencies.extend(semantics.get_dependency_for_node(&condition.id()));
+            }
+
+            semantics.dependency.insert(node.id(), dependencies);
+        }
         _ => {}
     }
 
     // Pass on global vars if they are not handled in dependency check
     match node.kind() {
-        "literal" | "conjunction" | "lubodyaggregate" => {},
+        "literal" | "conjunction" | "lubodyaggregate" | "altheadaggrelemvec" | "disjunction" => {},
         _ => {
             let mut global_vars : HashSet<String> = HashSet::new();
 
@@ -929,9 +1123,10 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
 
     //Keep track of any special literals
     match node.kind() {
-        "conjunction" | "bodyaggrelem" => {
+        "conjunction" | "bodyaggrelem" | "disjunction" => {
             semantics.special_literals.insert(node.id(), vec![SpecialLiteralSemantics::new(node, semantics, source.as_bytes())]);
         }
+        "altheadaggrelemvec" => {} // We deal with them in the dependency check
         _ => {
             let mut special_literals : Vec<SpecialLiteralSemantics> = Vec::new();
 
@@ -952,9 +1147,6 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
             semantics
                 .terms
                 .insert(node.id(), TermSemantics::new(node, &semantics.terms, source.as_bytes()));
-
-            let info_sem = TermSemantics::new(node, &semantics.terms, source.as_bytes());
-            info!("Term inspection: {:?} -- kind: {:?} -- kind: {:?}, operator: {:?}, value: {:?}", node.utf8_text(source.as_bytes()), node.kind(), info_sem.kind, info_sem.operator, info_sem.value);
         }
         _ => {}
     }

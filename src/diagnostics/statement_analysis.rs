@@ -365,6 +365,15 @@ fn throw_unsafe_error_for_vars(
 }
 
 #[test]
+fn no_variables_should_be_detected_as_safe() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(&mut diags, &create_test_document("a :- b.".to_string()));
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
 fn unsafe_variables_should_be_detected_no_body() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
 
@@ -499,6 +508,44 @@ fn safeness_should_not_be_blocked_by_not_in_head() {
 }
 
 #[test]
+fn safeness_should_work_with_integrity_constraints() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(":- b(X).".to_string()),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafeness_should_work_with_integrity_constraints() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(":- b(X), c(X+Y).".to_string()),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 1);
+
+    assert_eq!(
+        format!(
+            "{:?}",
+            diags
+                .total_diagnostics
+                .get(0)
+                .unwrap()
+                .code
+                .clone()
+                .unwrap()
+        ),
+        format!("Number({})", DiagnosticsCode::UnsafeVariable.into_i32())
+    );
+}
+
+#[test]
 fn unsafe_variables_should_be_detected_in_choice_rule_with_no_body() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
 
@@ -580,7 +627,7 @@ fn unsafe_variables_should_be_detected_in_conjunctions() {
         &create_test_document("{a(X)} :- a : b(X).".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 1);
+    assert_eq!(diags.total_diagnostics.len(), 2);
 
     assert_eq!(
         format!(
@@ -598,7 +645,7 @@ fn unsafe_variables_should_be_detected_in_conjunctions() {
 }
 
 #[test]
-fn safeness_should_be_detected_in_conjunctions() {
+fn safeness_should_be_detected_in_conjunctions_with_pure_variables() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
 
     statement_analysis(
@@ -682,7 +729,7 @@ fn unsafe_variables_should_be_detected_with_aggregates() {
         &create_test_document("a(X) :- N = #count{X : b(X)}.".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 1);
+    assert_eq!(diags.total_diagnostics.len(), 3);
 
     assert_eq!(
         format!(
@@ -807,11 +854,24 @@ fn unsafe_variables_should_be_detected_with_comparison() {
 
     statement_analysis(
         &mut diags,
-        &create_test_document(":- X1=X2, Y0=Y1..Y2, Z0=(Z1;Z2).".to_string()),
+        &create_test_document("a(Y) :- X=Y.".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 8);
+    assert_eq!(diags.total_diagnostics.len(), 3);
 }
+
+#[test]
+fn safe_variables_should_be_detected_with_comparison_indirectly() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document("a(Y) :- a(X), X=Y.".to_string()),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
 
 #[test]
 fn unsafe_variables_should_be_detected_with_multiple_statements_correctly() {
@@ -820,12 +880,100 @@ fn unsafe_variables_should_be_detected_with_multiple_statements_correctly() {
     statement_analysis(
         &mut diags,
         &create_test_document(
-            "a(X) :- N = #count{X : b(X)}.
-    a(N), c(X) :- N = #count{X : b(X)}.
-    :- X1=X2, Y0=Y1..Y2, Z0=(Z1;Z2)."
+            "a(X) :- b(Y). c(X) :- d(X). a(Y), b(Z) :- a(X), X=Y, Y=Z. c(X,Y) :- a(Z, Y)."
                 .to_string(),
         ),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 10);
+    assert_eq!(diags.total_diagnostics.len(), 2);
+}
+
+#[test]
+fn safe_variables_should_be_detected_with_pools() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X;X)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafe_variables_should_be_detected_with_pools() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X;Y)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafe_variables_should_be_detected_with_aritmethics() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X,Y) :- a(X+Y, X)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 2);
+}
+
+#[test]
+fn constant_should_safe_equation() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X+1)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn constant_cannot_safe_multiplication_if_zero() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(X*0)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 2);
+}
+
+#[test]
+fn negated_not_equals_should_be_handled_as_equals() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "a(X) :- a(Y), not Y != X."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
 }
