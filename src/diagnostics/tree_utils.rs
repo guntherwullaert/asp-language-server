@@ -78,6 +78,15 @@ pub enum LiteralType {
 }
 
 /**
+ * Atom semantics contain all the information needed around an atom
+ */
+#[derive(Clone, Debug)]
+pub struct AtomSemantics {
+    pub occurences: HashSet<usize>,
+}
+
+
+/**
  * Special Literal semantics contain all the information needed around a conditional literal or aggregate
  */
 #[derive(Clone, Debug)]
@@ -176,6 +185,8 @@ pub struct EncodingSemantics{
     pub depend: DashMap<usize, HashSet<String>>,
     pub dependency: DashMap<usize, Vec<(HashSet<String>, HashSet<String>)>>,
     pub special_literals: DashMap<usize, Vec<SpecialLiteralSemantics>>,
+    pub atoms: DashMap<(String, usize), AtomSemantics>,
+    pub atoms_arity: DashMap<usize, usize>
 }
 
 impl EncodingSemantics {
@@ -189,7 +200,9 @@ impl EncodingSemantics {
             provide: DashMap::new(),
             depend: DashMap::new(),
             dependency: DashMap::new(),
-            special_literals: DashMap::new()
+            special_literals: DashMap::new(),
+            atoms: DashMap::new(),
+            atoms_arity: DashMap::new(),
         }
     }
 
@@ -251,6 +264,16 @@ impl EncodingSemantics {
             return self.special_literals.get(node).unwrap().value().clone();
         }
         Vec::new()
+    }
+
+    /**
+     * Returns the amount of termvecs in this part of the encoding
+     */
+    pub fn get_atoms_arity_for_node(&self, node: &usize) -> usize {
+        if self.atoms_arity.contains_key(node) {
+            return self.atoms_arity.get(node).unwrap().value().clone();
+        }
+        0
     }
 
     /**
@@ -508,6 +531,35 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
             }
             semantics.vars.insert(node.id(), vars_in_children.clone());
         }
+    }
+
+    //Find all atoms with their arity
+    match node.kind() {
+        "atom" => {
+            if node.child_count() >= 3 {
+                let identifier = node.child(0).unwrap().utf8_text(source.as_bytes()).unwrap().to_string();
+                let arity = semantics.get_atoms_arity_for_node(&node.child(2).unwrap().id());
+
+                if semantics.atoms.contains_key(&(identifier.clone(), arity)) {
+                    semantics.atoms.get_mut(&(identifier, arity)).unwrap().occurences.insert(node.id());
+                } else {
+                    semantics.atoms.insert((identifier, arity), AtomSemantics { occurences: HashSet::new() });
+                }
+            }
+        }
+        "termvec" | "argvec" => {
+            let mut arity = 0;
+
+            if node.kind() == "termvec" {
+                arity = 1;
+            }
+
+            for child in node.children(&mut node.walk()) {
+                arity += semantics.get_atoms_arity_for_node(&child.id());
+            }
+            semantics.atoms_arity.insert(node.id(), arity);
+        }
+        _ => {}
     }
 
     //Perform provide function

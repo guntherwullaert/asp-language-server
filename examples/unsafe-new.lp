@@ -31,3 +31,4 @@ a(X) :- a(X;Y).
 a(X,Y) :- a(X+Y, X).
 a(X) :- a(X+1).
 a(X) :- a(X*0).
+%TODO: minimize, weak constraints, aggregates in the head
