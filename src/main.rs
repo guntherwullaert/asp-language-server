@@ -1,6 +1,6 @@
 use dashmap::DashMap;
 use diagnostics::run_diagnostics;
-use diagnostics::tree_utils::analyze_tree;
+use diagnostics::tree_utils::{analyze_tree, AtomOccurenceLocation};
 use document::DocumentData;
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -37,8 +37,9 @@ impl LanguageServer for Backend {
                     trigger_characters: Some(vec!["#".to_string()]),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
-                }),                
-
+                }),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -243,6 +244,100 @@ impl LanguageServer for Backend {
             Some(ret)
         }();
         Ok(completions.map(CompletionResponse::Array))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let definition_list = || -> Option<Vec<Location>> {
+            let document = self.document_map.get(&uri.to_string())?;
+
+            //TODO: Keep track if analysis has been done yet
+            let semantics = analyze_tree(&document.tree, &document.source);
+
+            let mut node = document.tree.root_node().descendant_for_point_range(Point { row: position.line as usize, column: (position.character) as usize }, Point { row: position.line as usize, column: (position.character) as usize });
+            let mut ret = Vec::new();
+
+            while node.is_some() {
+                // If we have an predicate with an identifier
+                info!("reference node {:?}", node);
+                if (node.unwrap().kind() == "atom" || node.unwrap().kind() == "term") && node.unwrap().child_count() >= 3 && node.unwrap().child(0).unwrap().kind() == "identifier" {
+                    //TODO: Maybe create a function for this ?!?
+                    let node_identifier = node.unwrap().child(0).unwrap().utf8_text(document.source.as_bytes()).unwrap().to_string();
+                    let node_arity = semantics.get_atoms_arity_for_node(&node.unwrap().child(2).unwrap().id()) + 1;
+
+                    for ((identifier, arity), atom) in semantics.atoms {
+                        // Find if this is the correct identifier and arity 
+                        if identifier == node_identifier && arity == node_arity {
+                            // Return all occurences that are in the head
+                            for occurence in atom.occurences {
+                                if occurence.location == AtomOccurenceLocation::Head {
+                                    let range = Range::new(Position { line: occurence.range.start_point.row as u32, character: occurence.range.start_point.column as u32}, Position { line: occurence.range.end_point.row as u32, character: occurence.range.end_point.column as u32});
+
+                                    ret.push(Location::new(uri.clone(), range));
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                    break;
+                }
+                node = node.unwrap().parent();
+            }
+            Some(ret)
+        }();
+        let definition = Some(GotoDefinitionResponse::Array(definition_list.unwrap()));
+        Ok(definition)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let reference_list = || -> Option<Vec<Location>> {
+            let document = self.document_map.get(&uri.to_string())?;
+
+            //TODO: Keep track if analysis has been done yet
+            let semantics = analyze_tree(&document.tree, &document.source);
+
+            let mut node = document.tree.root_node().descendant_for_point_range(Point { row: position.line as usize, column: (position.character) as usize }, Point { row: position.line as usize, column: (position.character) as usize });
+            let mut ret = Vec::new();
+
+            while node.is_some() {
+                // If we have an predicate with an identifier
+                info!("reference node {:?}", node);
+                if (node.unwrap().kind() == "atom" || node.unwrap().kind() == "term") && node.unwrap().child_count() >= 3 && node.unwrap().child(0).unwrap().kind() == "identifier" {
+                    //TODO: Maybe create a function for this ?!?
+                    let node_identifier = node.unwrap().child(0).unwrap().utf8_text(document.source.as_bytes()).unwrap().to_string();
+                    let node_arity = semantics.get_atoms_arity_for_node(&node.unwrap().child(2).unwrap().id()) + 1;
+
+                    for ((identifier, arity), atom) in semantics.atoms {
+                        // Find if this is the correct identifier and arity 
+                        if identifier == node_identifier && arity == node_arity {
+                            // Return all occurences that are in the body or condition
+                            for occurence in atom.occurences {
+                                if occurence.location == AtomOccurenceLocation::Body || occurence.location == AtomOccurenceLocation::Condition {
+                                    let range = Range::new(Position { line: occurence.range.start_point.row as u32, character: occurence.range.start_point.column as u32}, Position { line: occurence.range.end_point.row as u32, character: occurence.range.end_point.column as u32});
+
+                                    ret.push(Location::new(uri.clone(), range));
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                    break;
+                }
+                node = node.unwrap().parent();
+            }
+            Some(ret)
+        }();
+        Ok(reference_list)
     }
 }
 #[derive(Debug, Deserialize, Serialize)]

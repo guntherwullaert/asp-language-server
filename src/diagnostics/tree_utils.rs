@@ -78,11 +78,32 @@ pub enum LiteralType {
 }
 
 /**
+ * The location of an occurence in the encoding
+ */
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub enum AtomOccurenceLocation {
+    Head,
+    Body,
+    Condition
+}
+
+
+/**
+ * Atom Occurence semantics contain all the information needed to know where and what an occurence of an atom contains
+ */
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub struct AtomOccurenceSemantics {
+    pub node_id: usize,
+    pub range: tree_sitter::Range,
+    pub location: AtomOccurenceLocation,
+}
+
+/**
  * Atom semantics contain all the information needed around an atom
  */
 #[derive(Clone, Debug)]
 pub struct AtomSemantics {
-    pub occurences: HashSet<usize>,
+    pub occurences: HashSet<AtomOccurenceSemantics>,
 }
 
 
@@ -535,29 +556,52 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
 
     //Find all atoms with their arity
     match node.kind() {
-        "atom" => {
-            if node.child_count() >= 3 {
+        "atom" | "term" => {
+            if node.child_count() >= 3 && node.child(0).unwrap().kind() == "identifier" {
                 let identifier = node.child(0).unwrap().utf8_text(source.as_bytes()).unwrap().to_string();
-                let arity = semantics.get_atoms_arity_for_node(&node.child(2).unwrap().id());
+                let arity = semantics.get_atoms_arity_for_node(&node.child(2).unwrap().id()) + 1;
+
+                let mut location = AtomOccurenceLocation::Head;
+                let mut parent = node.parent();
+                while parent.is_some() {
+                    match parent.unwrap().kind() {
+                        "bodydot" => location = AtomOccurenceLocation::Body,
+                        "optcondition" => location = AtomOccurenceLocation::Condition,
+                        _ => {}
+                    }
+                    parent = parent.unwrap().parent();
+                }
 
                 if semantics.atoms.contains_key(&(identifier.clone(), arity)) {
-                    semantics.atoms.get_mut(&(identifier, arity)).unwrap().occurences.insert(node.id());
+                    semantics.atoms.get_mut(&(identifier, arity)).unwrap().occurences.insert(
+                        AtomOccurenceSemantics {
+                            node_id: node.id(),
+                            range: node.range(),
+                            location
+                        }
+                    );
                 } else {
-                    semantics.atoms.insert((identifier, arity), AtomSemantics { occurences: HashSet::new() });
+                    let mut occurences = HashSet::new();
+
+                    occurences.insert(AtomOccurenceSemantics {
+                        node_id: node.id(),
+                        range: node.range(),
+                        location
+                    });
+                    semantics.atoms.insert((identifier, arity), AtomSemantics { occurences });
                 }
             }
         }
         "termvec" | "argvec" => {
             let mut arity = 0;
 
-            if node.kind() == "termvec" {
-                arity = 1;
-            }
-
             for child in node.children(&mut node.walk()) {
                 arity += semantics.get_atoms_arity_for_node(&child.id());
             }
             semantics.atoms_arity.insert(node.id(), arity);
+        }
+        "COMMA" => {
+            semantics.atoms_arity.insert(node.id(), 1);
         }
         _ => {}
     }
