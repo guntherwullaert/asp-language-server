@@ -4,8 +4,6 @@ use dashmap::DashMap;
 use log::info;
 use tree_sitter::{Node, Query, QueryCursor, Range, Tree, TreeCursor};
 
-use super::tree_error_analysis::{ErrorSemantic, MissingSemantic};
-
 /**
  * Convert a token value into a human readable string
  */
@@ -38,7 +36,7 @@ pub fn retrace(mut cursor: TreeCursor) -> (TreeCursor, bool) {
     }
     (cursor, reached_root)
 }
-
+/*
 /**
  * Do a simple query on a part of the parse tree and return the captures
  */
@@ -192,9 +190,7 @@ impl SpecialLiteralSemantics {
     }
 }
 
-/**
  * Encoding semantics are all the information needed about the program that then can be used by the other parts of the LSP
- */
 #[derive(Clone, Debug)]
 pub struct EncodingSemantics{
     pub errors: Vec<ErrorSemantic>,
@@ -1246,4 +1242,4 @@ pub fn on_node(node: &Node, semantics: &mut EncodingSemantics, source: &str) {
         }
         _ => {}
     }
-}
+}*/

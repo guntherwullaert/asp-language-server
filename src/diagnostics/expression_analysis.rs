@@ -1,5 +1,5 @@
 use tower_lsp::lsp_types::DiagnosticSeverity;
-
+/*
 use crate::document::DocumentData;
 
 use super::{
@@ -46,3 +46,4 @@ pub fn analyze_expressions(diagnostic_data: &mut DiagnosticsRunData, document: &
         }
     }
 }
+*/

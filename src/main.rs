@@ -1,9 +1,14 @@
+use std::thread;
+use std::time::Instant;
+
 use dashmap::DashMap;
 use diagnostics::run_diagnostics;
-use diagnostics::tree_utils::{analyze_tree, AtomOccurenceLocation};
 use document::DocumentData;
 use log::info;
+use semantics::encoding_semantic::EncodingSemantics;
 use serde::{Deserialize, Serialize};
+use ropey::Rope;
+use tokio::task::{self, JoinHandle};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
@@ -13,14 +18,16 @@ use tree_sitter::{Parser, Point};
 
 mod diagnostics;
 mod document;
+mod semantics;
 
 #[cfg(test)]
 mod test_utils;
 
-#[derive(Debug)]
 struct Backend {
     client: Client,
     document_map: DashMap<String, DocumentData>,
+    analysis_handle: Option<JoinHandle<EncodingSemantics>>,
+    diagnostics_handle: Option<JoinHandle<()>>
 }
 
 #[tower_lsp::async_trait]
@@ -30,7 +37,7 @@ impl LanguageServer for Backend {
             server_info: None,
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                    TextDocumentSyncKind::INCREMENTAL,
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
@@ -81,25 +88,41 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!("file {} opened!", params.text_document.uri),
-            )
-            .await;
+        info!("File {} opened with text: {:?} and version {:?}", params.text_document.uri, params.text_document.text, params.text_document.version);
 
-        self.on_change(
-            &params.text_document.uri,
-            &params.text_document.text,
-            params.text_document.version,
+        let time = Instant::now();
+
+        // Use rope for an efficient way to access byte offsets and string slices
+        let rope = ropey::Rope::from_str(&params.text_document.text);
+
+        // Parse the document and save the parse tree in a hashmap
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_clingo::language()).expect("Error loading clingo grammar");
+        let tree = parser.parse(params.text_document.text.clone(), None).unwrap();
+        let mut doc = DocumentData::new(params.text_document.uri.clone(), tree, rope.clone(), params.text_document.version);
+
+        let duration = time.elapsed();
+        info!("Time needed for first time generating the document: {:?}", duration);
+        doc.generate_semantics(None);
+        self.document_map.insert(params.text_document.uri.to_string(), doc);
+
+        // Run diagnostics for that file
+        /*let time = Instant::now();
+        run_diagnostics(
+            &self.client,
+            &mut self.document_map.get(&params.text_document.uri.to_string()).unwrap().clone(),
+            100,
         )
         .await;
+        let duration = time.elapsed();
+        info!("Time needed for diagnostics: {:?}", duration);*/
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
+        let client_copy = self.client.clone();
+        let uri = params.text_document.uri.clone().to_string();
 
-        if !self.document_map.contains_key(&uri) {
+        /*if !self.document_map.contains_key(&uri) {
             self.client
                 .log_message(
                     MessageType::ERROR,
@@ -107,23 +130,61 @@ impl LanguageServer for Backend {
                 )
                 .await;
             return;
+        }*/
+
+        //TODO: Figure out if we are running a semantic analysis if so, cancel that semantic analysis
+        info!("Document change incoming for document: {}\nWith the following changes: {:?}", uri, params.content_changes.clone());
+        
+        let mut document = self.document_map.get_mut(&uri).unwrap().clone();
+
+        info!("Got document reference");
+        
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_clingo::language()).expect("Error loading clingo grammar");
+
+        document.update_document(params.content_changes, &mut parser);
+
+        /*if self.diagnostics_handle.is_some() {
+            self.diagnostics_handle.unwrap().abort();
         }
 
-        self.client
-            .log_message(
-                MessageType::LOG,
-                format!("Document change incomming for document: {}\n", uri),
-            )
-            .await;
+        self.diagnostics_handle = Some(task::spawn(async {
+            
+        }));
 
-        for change in params.content_changes {
-            self.on_change(
-                &params.text_document.uri,
-                &change.text,
-                params.text_document.version,
-            )
-            .await;
-        }
+        let result = self.diagnostics_handle.unwrap().await;
+
+        if result.is_err() {
+            info!("ERROR:  {:?}", result)
+        }*/
+
+        let time = Instant::now();
+        let diagnostics = run_diagnostics(
+            document.clone(),
+            100,
+        );
+        info!("Fetched Diagnostics");
+        client_copy.publish_diagnostics(
+            params.text_document.uri.clone(),
+            Vec::new(),
+            Some(1),
+        ).await;
+        let duration = time.elapsed();
+        info!("Time needed for diagnostics: {:?}", duration);
+
+        // Run diagnostics for that file
+        //tokio::spawn(async {});
+        /*let time = Instant::now();
+        run_diagnostics(
+            &self.client,
+            &mut document.value().clone(),
+            100,
+        )
+        .await;
+        let duration = time.elapsed();
+        info!("Time needed for diagnostics: {:?}", duration);*/
+
+        
     }
 
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
@@ -132,12 +193,25 @@ impl LanguageServer for Backend {
             .await;
     }
 
-    async fn did_close(&self, _: DidCloseTextDocumentParams) {
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+
         self.client
             .log_message(MessageType::INFO, "file closed!")
             .await;
 
-        //TODO: Remove the file from our list
+        if !self.document_map.contains_key(&uri) {
+            self.client
+                .log_message(
+                    MessageType::ERROR,
+                    format!("Document {} closed before opening!", uri),
+                )
+                .await;
+            return;
+        }
+
+        // Remove our information for this file
+        self.document_map.remove(&uri);
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -151,7 +225,7 @@ impl LanguageServer for Backend {
             let document = self.document_map.get(&uri.to_string())?;
 
             //TODO: Keep track if analysis has been done yet
-            let semantics = analyze_tree(&document.tree, &document.source);
+            /*let semantics = analyze_tree(&document.tree, &document.source.to_string());
 
             if context.is_some() {
                 let c = context.unwrap();
@@ -182,9 +256,9 @@ impl LanguageServer for Backend {
                     //Client requested completion
                     //TODO: This could lead to an underflow
                     let node = document.tree.root_node().descendant_for_point_range(Point { row: position.line as usize, column: (position.character - 1) as usize }, Point { row: position.line as usize, column: (position.character - 1) as usize });
-                    
+
                     if node.is_some() {
-                        info!("Client wants to complete {:?} with value {:?}", node.unwrap().kind(), node.unwrap().utf8_text(document.source.as_bytes()));
+                        //info!("Client wants to complete {:?} with value {:?}", node.unwrap().kind(), node.unwrap().utf8_text(document.get_bytes()));
 
                         let mut parent = node.unwrap().parent();
                         while parent.is_some() {
@@ -240,7 +314,7 @@ impl LanguageServer for Backend {
                     // More ?
 
                 }
-            }
+            }*/
             Some(ret)
         }();
         Ok(completions.map(CompletionResponse::Array))
@@ -257,12 +331,12 @@ impl LanguageServer for Backend {
             let document = self.document_map.get(&uri.to_string())?;
 
             //TODO: Keep track if analysis has been done yet
-            let semantics = analyze_tree(&document.tree, &document.source);
+            //let semantics = analyze_tree(&document.tree, &document.source);
 
             let mut node = document.tree.root_node().descendant_for_point_range(Point { row: position.line as usize, column: (position.character) as usize }, Point { row: position.line as usize, column: (position.character) as usize });
             let mut ret = Vec::new();
 
-            while node.is_some() {
+            /*while node.is_some() {
                 // If we have an predicate with an identifier
                 info!("reference node {:?}", node);
                 if (node.unwrap().kind() == "atom" || node.unwrap().kind() == "term") && node.unwrap().child_count() >= 3 && node.unwrap().child(0).unwrap().kind() == "identifier" {
@@ -288,7 +362,7 @@ impl LanguageServer for Backend {
                     break;
                 }
                 node = node.unwrap().parent();
-            }
+            }*/
             Some(ret)
         }();
         let definition = Some(GotoDefinitionResponse::Array(definition_list.unwrap()));
@@ -303,12 +377,12 @@ impl LanguageServer for Backend {
             let document = self.document_map.get(&uri.to_string())?;
 
             //TODO: Keep track if analysis has been done yet
-            let semantics = analyze_tree(&document.tree, &document.source);
+            //let semantics = analyze_tree(&document.tree, &document.source);
 
             let mut node = document.tree.root_node().descendant_for_point_range(Point { row: position.line as usize, column: (position.character) as usize }, Point { row: position.line as usize, column: (position.character) as usize });
             let mut ret = Vec::new();
 
-            while node.is_some() {
+            /*while node.is_some() {
                 // If we have an predicate with an identifier
                 info!("reference node {:?}", node);
                 if (node.unwrap().kind() == "atom" || node.unwrap().kind() == "term") && node.unwrap().child_count() >= 3 && node.unwrap().child(0).unwrap().kind() == "identifier" {
@@ -334,7 +408,7 @@ impl LanguageServer for Backend {
                     break;
                 }
                 node = node.unwrap().parent();
-            }
+            }*/
             Some(ret)
         }();
         Ok(reference_list)
@@ -351,26 +425,7 @@ impl Notification for CustomNotification {
     const METHOD: &'static str = "custom/notification";
 }
 impl Backend {
-    async fn on_change(&self, uri: &Url, document: &String, version: i32) {
-        // Create a Parser for this document
-        let mut parser = Parser::new();
-        parser
-            .set_language(tree_sitter_clingo::language())
-            .expect("Error loading clingo grammar");
 
-        // Parse the document and save the parse tree in a hashmap
-        let tree = parser.parse(document, None).unwrap();
-        let doc = DocumentData::new(uri.clone(), tree, document.clone(), version);
-        self.document_map.insert(uri.to_string(), doc);
-
-        // Run diagnostics for that file
-        run_diagnostics(
-            &self.client,
-            &mut self.document_map.get(&uri.to_string()).unwrap().clone(),
-            100,
-        )
-        .await;
-    }
 }
 
 #[tokio::main]
@@ -380,10 +435,7 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(|client| Backend {
-        client,
-        document_map: DashMap::new(),
-    })
+    let (service, socket) = LspService::build(|client| Backend {client,document_map:DashMap::new(),analysis_handle:None, diagnostics_handle: None })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

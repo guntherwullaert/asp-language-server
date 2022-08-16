@@ -3,8 +3,9 @@ use std::str::FromStr;
 use tower_lsp::lsp_types::Url;
 use tree_sitter::Parser;
 
-use crate::{diagnostics::tree_utils::analyze_tree, document::DocumentData};
+use crate::{document::DocumentData};
 
+/*
 pub fn create_test_document(source: String) -> DocumentData {
     let mut parser = Parser::new();
     parser
@@ -17,3 +18,4 @@ pub fn create_test_document(source: String) -> DocumentData {
     doc.semantics = analyze_tree(&doc.tree, &doc.source);
     doc
 }
+*/

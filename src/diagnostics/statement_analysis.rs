@@ -4,11 +4,11 @@ use dashmap::DashMap;
 use log::info;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tree_sitter::{Node, TreeCursor};
-
+/*
 use crate::{document::DocumentData, diagnostics::tree_utils::SpecialLiteralSemantics};
 
-#[cfg(test)]
-use crate::test_utils::create_test_document;
+//#[cfg(test)]
+//use crate::test_utils::create_test_document;
 
 use super::{
     diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::{retrace, EncodingSemantics, do_simple_query},
@@ -60,7 +60,7 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
                 DiagnosticsCode::UnsafeVariable.into_i32(),
                 format!("'{:?}' are safe", document.semantics.get_vars_for_node(&node.id())),
             );*/
-            check_safety_of_statement(&node, &document.semantics, diagnostic_data, document.source.as_bytes());
+            //TODO: check_safety_of_statement(&node, &document.semantics, diagnostic_data, document.source.as_bytes());
         }
 
         if cursor.goto_first_child() {
@@ -363,6 +363,8 @@ fn throw_unsafe_error_for_vars(
         }
     }
 }
+
+/*
 
 #[test]
 fn no_variables_should_be_detected_as_safe() {
@@ -977,3 +979,5 @@ fn negated_not_equals_should_be_handled_as_equals() {
 
     assert_eq!(diags.total_diagnostics.len(), 0);
 }
+*/
+*/

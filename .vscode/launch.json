@@ -18,7 +18,8 @@
         "script": "watch"
       },
       "env": {
-        "SERVER_PATH": "${workspaceRoot}/target/debug/asp-language-server"
+        "SERVER_PATH": "${workspaceRoot}/target/debug/asp-language-server",
+        "RUST_BACKTRACE": "1"
       }
     },
     // {
