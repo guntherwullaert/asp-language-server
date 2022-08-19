@@ -35,11 +35,7 @@ pub fn run_diagnostics(
     //Analyze the tree and get all the semantic data out of it
     //document.semantics = analyze_tree(&document.tree, &document.source);
 
-    info!("Started Diagnostics");
-
-    //search_for_tree_error(&mut diagnostic_data, document);
-
-    info!("Finished Search");
+    search_for_tree_error(&mut diagnostic_data, &document);
     
     //analyze_expressions(&mut diagnostic_data, document);
 

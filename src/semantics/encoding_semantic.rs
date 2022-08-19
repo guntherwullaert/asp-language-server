@@ -1,6 +1,7 @@
 use dashmap::{DashMap, DashSet};
 use im_rc::HashSet;
 use log::info;
+use rust_lapper::Lapper;
 use serde::__private::doc;
 use tree_sitter::{Node, Range};
 
@@ -42,19 +43,22 @@ impl EncodingSemantics {
     /**
      * On discovering a node this function gets called and all the analyzers need to decide what this means now
      */
-    pub fn on_node(node: Node, document: &mut DocumentData, changed_ranges: &Option<Vec<(usize, usize)>>) {
+    pub fn on_node(node: Node, document: &mut DocumentData, changed_ranges: &Option<Lapper<usize, usize>>) {
         document.semantics.node_ids_encountered.remove(&node.id());
 
         // Check if node is affected by the changes
         // This is quite expensive to find out
-        if changed_ranges.is_some() {
-            for (start_byte, end_byte) in changed_ranges.as_ref().unwrap() {
+        if let Some(ranges) = changed_ranges {
+            if ranges.find(node.range().start_byte, node.range().end_byte).any(|_| true) {
+                EncodingSemantics::checks_on_only_affected_area(node, document);
+            }
+            /*for (start_byte, end_byte) in ranges {
                 if node.range().start_byte < *end_byte && node.range().end_byte > *start_byte {
                     // Perform checks that only care about the affected area
                     EncodingSemantics::checks_on_only_affected_area(node, document);
                     break;
                 }
-            }
+            }*/
         } else {
             // For first check we check everything
             EncodingSemantics::checks_on_only_affected_area(node, document);

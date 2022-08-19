@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
@@ -8,8 +9,9 @@ use log::info;
 use semantics::encoding_semantic::EncodingSemantics;
 use serde::{Deserialize, Serialize};
 use ropey::Rope;
+use tokio::runtime::Handle;
 use tokio::task::{self, JoinHandle};
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Result, self};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -25,9 +27,7 @@ mod test_utils;
 
 struct Backend {
     client: Client,
-    document_map: DashMap<String, DocumentData>,
-    analysis_handle: Option<JoinHandle<EncodingSemantics>>,
-    diagnostics_handle: Option<JoinHandle<()>>
+    document_map: DashMap<String, DocumentData>
 }
 
 #[tower_lsp::async_trait]
@@ -98,31 +98,35 @@ impl LanguageServer for Backend {
         // Parse the document and save the parse tree in a hashmap
         let mut parser = Parser::new();
         parser.set_language(tree_sitter_clingo::language()).expect("Error loading clingo grammar");
+
         let tree = parser.parse(params.text_document.text.clone(), None).unwrap();
-        let mut doc = DocumentData::new(params.text_document.uri.clone(), tree, rope.clone(), params.text_document.version);
+        let mut doc = DocumentData::new(params.text_document.uri.clone(), tree, rope, params.text_document.version);
 
         let duration = time.elapsed();
         info!("Time needed for first time generating the document: {:?}", duration);
         doc.generate_semantics(None);
-        self.document_map.insert(params.text_document.uri.to_string(), doc);
+        self.document_map.insert(params.text_document.uri.to_string(), doc.clone());
 
         // Run diagnostics for that file
-        /*let time = Instant::now();
-        run_diagnostics(
-            &self.client,
-            &mut self.document_map.get(&params.text_document.uri.to_string()).unwrap().clone(),
+        let time = Instant::now();
+        let diagnostics = run_diagnostics(
+            doc,
             100,
-        )
-        .await;
+        );
+        self.client.publish_diagnostics(
+            params.text_document.uri.clone(),
+            diagnostics,
+            Some(1),
+        ).await;
         let duration = time.elapsed();
-        info!("Time needed for diagnostics: {:?}", duration);*/
+        info!("Time needed for diagnostics: {:?}", duration);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let client_copy = self.client.clone();
         let uri = params.text_document.uri.clone().to_string();
 
-        /*if !self.document_map.contains_key(&uri) {
+        if !self.document_map.contains_key(&uri) {
             self.client
                 .log_message(
                     MessageType::ERROR,
@@ -130,12 +134,12 @@ impl LanguageServer for Backend {
                 )
                 .await;
             return;
-        }*/
+        }
 
         //TODO: Figure out if we are running a semantic analysis if so, cancel that semantic analysis
         info!("Document change incoming for document: {}\nWith the following changes: {:?}", uri, params.content_changes.clone());
         
-        let mut document = self.document_map.get_mut(&uri).unwrap().clone();
+        let mut document = self.document_map.get(&uri).unwrap().clone();
 
         info!("Got document reference");
         
@@ -143,48 +147,22 @@ impl LanguageServer for Backend {
         parser.set_language(tree_sitter_clingo::language()).expect("Error loading clingo grammar");
 
         document.update_document(params.content_changes, &mut parser);
+        let doc = document.clone();
 
-        /*if self.diagnostics_handle.is_some() {
-            self.diagnostics_handle.unwrap().abort();
-        }
-
-        self.diagnostics_handle = Some(task::spawn(async {
-            
-        }));
-
-        let result = self.diagnostics_handle.unwrap().await;
-
-        if result.is_err() {
-            info!("ERROR:  {:?}", result)
-        }*/
+        self.document_map.insert(uri, document);
 
         let time = Instant::now();
         let diagnostics = run_diagnostics(
-            document.clone(),
+            doc,
             100,
         );
-        info!("Fetched Diagnostics");
         client_copy.publish_diagnostics(
             params.text_document.uri.clone(),
-            Vec::new(),
+            diagnostics,
             Some(1),
         ).await;
         let duration = time.elapsed();
         info!("Time needed for diagnostics: {:?}", duration);
-
-        // Run diagnostics for that file
-        //tokio::spawn(async {});
-        /*let time = Instant::now();
-        run_diagnostics(
-            &self.client,
-            &mut document.value().clone(),
-            100,
-        )
-        .await;
-        let duration = time.elapsed();
-        info!("Time needed for diagnostics: {:?}", duration);*/
-
-        
     }
 
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
@@ -324,7 +302,7 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri;
+        /*let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
         let definition_list = || -> Option<Vec<Location>> {
@@ -366,7 +344,8 @@ impl LanguageServer for Backend {
             Some(ret)
         }();
         let definition = Some(GotoDefinitionResponse::Array(definition_list.unwrap()));
-        Ok(definition)
+        Ok(definition)*/
+        Result::Err(tower_lsp::jsonrpc::Error::new(tower_lsp::jsonrpc::ErrorCode::InternalError))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -424,9 +403,6 @@ impl Notification for CustomNotification {
     type Params = InlayHintParams;
     const METHOD: &'static str = "custom/notification";
 }
-impl Backend {
-
-}
 
 #[tokio::main]
 async fn main() {
@@ -435,7 +411,9 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(|client| Backend {client,document_map:DashMap::new(),analysis_handle:None, diagnostics_handle: None })
+    let (service, socket) = LspService::build(|client| Backend {
+        client: client.clone(),
+        document_map:DashMap::new()})
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

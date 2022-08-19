@@ -17,6 +17,7 @@ log = "0.4.14"
 im-rc = "15.0.0"
 tree-sitter = "0.20.6"
 tree-sitter-clingo = "0.0.9"
+rust-lapper = "1.0.1"
 
 [debug]
 incremental = true

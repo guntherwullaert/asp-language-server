@@ -3856,7 +3856,9 @@ options(5).
 % max number of cars with i-th option per block
 maxCarsInBlock(1,1).maxCarsInBlock(2,2).
 maxCarsInBlock(3,1).maxCarsInBlock(4,2).
-maxCarsInBlock(5,1).
+maxCarsInBlock(5,10000).
+test.
+
 
 % block size per option
 blockSize(1,2).blockSize(2,3).blockSize(3,3).
@@ -3868,8 +3870,9 @@ carPerClass(4,2).carPerClass(5,8).carPerClass(6,15).
 carPerClass(7,1).carPerClass(8,5).carPerClass(9,2).
 carPerClass(10,3).carPerClass(11,2).carPerClass(12,1).
 carPerClass(13,8).carPerClass(14,3).carPerClass(15,10).
-carPerClass(16,4).carPerClass(17,4).carPerClass(18,2).
+carPerClass(16,4).carPerClass(17,4).carPerClass(18,200).
 
+another(TEST).
 
 % option included in class
 % optInClass(C,Opt,1) means that for class C option Opt  is request, 
@@ -4946,7 +4949,7 @@ optInClass(18,1,1).optInClass(18,2,0).optInClass(18,3,0).optInClass(18,4,0).optI
 
 test :- test(COMEAGAIN).
 
-QUICK AS A FOX
+a(QUICK).
 
 % max number of cars with i-th option per block
 maxCarsInBlock(1,1).maxCarsInBlock(2,2).
@@ -5582,9 +5585,7 @@ options(1).
 options(2).
 options(3).
 options(4).
-options(5).
-
-ANOTHER QUICK BROWN FOXkjkl
+options(5). test(1).
 
 % max number of cars with i-th option per block
 maxCarsInBlock(1,1).maxCarsInBlock(2,2).
@@ -8027,7 +8028,9 @@ carPerClass(13,8).carPerClass(14,3).carPerClass(15,10).
 carPerClass(16,4).carPerClass(17,4).carPerClass(18,2).
 
 test :- test(WITH_VAR).
+another(TEST).
 
+test.
 
 % option included in class
 % optInClass(C,Opt,1) means that for class C option Opt  is request, 

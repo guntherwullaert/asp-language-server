@@ -35,5 +35,5 @@ a :- b.
 a :- b.
 a :- b.
 a :- b.
-a :- b.
+a :- b(QUICK).
 a :- b.

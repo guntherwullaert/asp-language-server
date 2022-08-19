@@ -1,7 +1,8 @@
-use std::time::Instant;
+use std::{time::Instant, sync::{Arc, atomic::AtomicUsize}};
 
 use log::info;
 use ropey::Rope;
+use rust_lapper::{Interval, Lapper};
 use tower_lsp::lsp_types::{Url, TextDocumentContentChangeEvent, Position};
 use tree_sitter::{Tree, InputEdit, Point, Parser, Range};
 
@@ -44,13 +45,13 @@ impl DocumentData {
     }
 
     pub fn get_source_for_range(&self, range: Range) -> String {
-        return self.source.byte_slice(range.start_byte..range.end_byte).as_str().unwrap().to_string();
+        self.source.byte_slice(range.start_byte..range.end_byte).to_string()
     }
 
     pub fn update_document(&mut self, changes: Vec<TextDocumentContentChangeEvent>, parser: &mut Parser) {
         
         let old_tree = &self.tree.clone();
-        let mut changed_ranges_test: Vec<(usize, usize)> = Vec::with_capacity(10);
+        let mut changed_ranges: Vec<Interval<usize, usize>> = Vec::with_capacity(10);
 
         // Go over each change in order and apply them to to the rope
         for change in changes {
@@ -98,9 +99,9 @@ impl DocumentData {
             });
 
             if start_byte <= new_end_byte {
-                changed_ranges_test.push((start_byte, new_end_byte));
+                changed_ranges.push(Interval{ start: start_byte, stop: new_end_byte + 1, val: 0 });
             } else  {
-                changed_ranges_test.push((new_end_byte, start_byte));
+                changed_ranges.push(Interval{ start: new_end_byte, stop: start_byte + 1, val: 0 });
             }
 
             let duration = time.elapsed();
@@ -115,7 +116,16 @@ impl DocumentData {
         info!("Time needed for parsing the rope: {:?}", duration);
 
         let time = Instant::now();
-        let mut changed_ranges: Vec<(usize, usize)> = Vec::with_capacity(10);
+        for change in old_tree.changed_ranges(&self.tree) {
+            changed_ranges.push(Interval { start: change.start_byte, stop: change.end_byte + 1, val: 0 })
+        }
+
+        // make lapper structure which will allow us to efficiently search if a range was changed
+        let mut lapper = Lapper::new(changed_ranges);
+
+        // Merge any intervals that overlap to have a quicker querrying performance
+        lapper.merge_overlaps();
+
         // As we only use the start and end we combine duplicate values to significantly increase performance in the semantic analysis
         /*for change in old_tree.changed_ranges(&self.tree) {
             let mut found = false;
@@ -141,7 +151,7 @@ impl DocumentData {
             if !found {
                 changed_ranges.push((change.start_byte, change.end_byte));
             }
-        }*/
+        }
 
         for (range_start, range_end) in changed_ranges_test.clone() {
             let mut found = false;
@@ -167,18 +177,25 @@ impl DocumentData {
             if !found {
                 changed_ranges.push((range_start, range_end));
             }
-        }
+        }*/
 
         let duration = time.elapsed();
         info!("Time needed for finding the ranges that changed: {:?}", duration);
 
 
-        info!("Changed Ranges: {:?}", changed_ranges_test);
+        info!("Changed Ranges: {:?}", lapper.intervals);
+        
+        self.generate_semantics(Some(lapper));
 
-        self.generate_semantics(Some(changed_ranges));
+        /*if changed_ranges.len() < 10 {
+            self.generate_semantics(Some(changed_ranges));
+        } else {
+            self.generate_semantics(None);
+            info!("Too many changes, doing a full document scan!");
+        }*/
     }
 
-    pub fn generate_semantics(&mut self, changed_ranges: Option<Vec<(usize, usize)>>) {
+    pub fn generate_semantics(&mut self, changed_ranges: Option<Lapper<usize, usize>>) {
         analyze_tree(self, &changed_ranges);
 
         //info!("Statement Semantics: {:?}", self.semantics.statement_semantics);

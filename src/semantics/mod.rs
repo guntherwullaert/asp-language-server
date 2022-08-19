@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use log::info;
+use rust_lapper::Lapper;
 use tree_sitter::Range;
 
 use crate::document::DocumentData;
@@ -11,6 +12,7 @@ pub mod encoding_semantic;
 mod error_semantic;
 mod missing_semantic;
 mod statement_semantic;
+mod term_semantic;
 mod syntax;
 
 /**
@@ -18,7 +20,7 @@ mod syntax;
  */
 pub fn analyze_tree(
     document: &mut DocumentData,
-    changed_ranges: &Option<Vec<(usize, usize)>>
+    changed_ranges: &Option<Lapper<usize, usize>>
 ) {
     let doc = document.clone();
     let mut cursor = doc.tree.walk();
