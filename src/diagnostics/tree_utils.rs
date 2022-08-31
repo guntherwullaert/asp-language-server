@@ -2,6 +2,7 @@ use std::{collections::HashSet};
 
 use dashmap::DashMap;
 use log::info;
+use ropey::Rope;
 use tree_sitter::{Node, Query, QueryCursor, Range, Tree, TreeCursor};
 
 /**
@@ -36,34 +37,8 @@ pub fn retrace(mut cursor: TreeCursor) -> (TreeCursor, bool) {
     }
     (cursor, reached_root)
 }
+
 /*
-/**
- * Do a simple query on a part of the parse tree and return the captures
- */
-#[allow(dead_code)]
-pub fn do_simple_query<'a>(
-    query_string: &'a str,
-    node: &tree_sitter::Node<'a>,
-    source: &'a [u8],
-) -> std::vec::Vec<(tree_sitter::Range, &'a str, tree_sitter::Node<'a>)> {
-    let mut query_cursor = QueryCursor::new();
-    let query = Query::new(tree_sitter_clingo::language(), query_string).unwrap();
-
-    let matches = query_cursor.matches(&query, *node, source);
-    let mut output = Vec::new();
-
-    for each_match in matches {
-        for capture in each_match.captures.iter() {
-            let range = capture.node.range();
-            let name = capture.node.utf8_text(source).unwrap();
-
-            output.push((range, name, capture.node));
-        }
-    }
-
-    output
-}
-
 /**
  * What type a literal is
  */

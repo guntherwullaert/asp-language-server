@@ -4,7 +4,7 @@ use tree_sitter::{Range, Node, Point};
 
 use crate::document::DocumentData;
 
-use super::statement_semantic::StatementSemantics;
+use super::{statement_semantic::StatementSemantics, encoding_semantic::Semantics};
 
 /**
  * What type of operation this term is
@@ -67,7 +67,7 @@ impl TermSemantic {
                 // We have a term, find out based on the children what type of term we have
                 if node.child_count() == 1 {
                     //If we only have one child we pass on the values of that child
-                    let child = StatementSemantics::get_statement_semantics_for_node(&document.semantics, node.child(0).unwrap().id()).term;
+                    let child = document.semantics.get_statement_semantics_for_node(node.child(0).unwrap().id()).term;
                     
                     kind = child.kind.clone();
                     value = child.value.clone();
@@ -92,8 +92,8 @@ impl TermSemantic {
                         _ => {}
                     }
                     //We check what the children are
-                    let left_child = StatementSemantics::get_statement_semantics_for_node(&document.semantics, node.child(0).unwrap().id());
-                    let right_child = StatementSemantics::get_statement_semantics_for_node(&document.semantics, node.child(2).unwrap().id());
+                    let left_child = document.semantics.get_statement_semantics_for_node(node.child(0).unwrap().id());
+                    let right_child = document.semantics.get_statement_semantics_for_node(node.child(2).unwrap().id());
 
                     if left_child.term.kind == TermType::Constant && right_child.term.kind == TermType::Constant {
                         //If both children are constant the resulting term is constant and we can evaluate the value of the constant
@@ -155,5 +155,31 @@ impl TermSemantic {
         }
 
         result_set
+    }
+
+    /**
+     * Negates an comparison operator provided and returns the new operator as a string
+     */
+    pub fn negate_comparison_operator(operator: &str) -> &str {
+        match operator {
+            "NEQ" => "EQ",
+            "EQ" => "NEQ",
+            "LT" => "GEQ",
+            "GT" => "LEQ",
+            "LEQ" => "GT",
+            "GEQ" => "LT",
+            _ => ""
+        }
+    }
+}
+
+impl Semantics for TermSemantic {
+    fn on_node(node: Node, document: &mut DocumentData) {
+        match node.kind() {
+            "dec" | "NUMBER" | "term" | "VARIABLE" | "identifier" => {
+                document.semantics.get_statement_semantics_for_node(node.id()).term = TermSemantic::from_node(node, document);
+            }
+            _ => {}
+        }
     }
 }

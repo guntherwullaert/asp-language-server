@@ -7,7 +7,7 @@ use tree_sitter::{Node, Range};
 
 use crate::document::DocumentData;
 
-use super::{error_semantic::{ErrorSemantic}, syntax::Syntax, statement_semantic::{StatementSemantics, self}};
+use super::{error_semantic::{ErrorSemantic}, syntax::Syntax, statement_semantic::{StatementSemantics, self}, term_semantic::TermSemantic};
 
 /**
  * Encoding semantics are all the information needed about the program that then can be used by the other parts of the LSP
@@ -49,7 +49,7 @@ impl EncodingSemantics {
         // Check if node is affected by the changes
         // This is quite expensive to find out
         if let Some(ranges) = changed_ranges {
-            if ranges.find(node.range().start_byte, node.range().end_byte).any(|_| true) {
+            if ranges.find(node.range().start_byte, node.range().end_byte).any(|_| true) || !document.semantics.statement_semantics.contains_key(&node.id()) {
                 EncodingSemantics::checks_on_only_affected_area(node, document);
             }
             /*for (start_byte, end_byte) in ranges {
@@ -72,6 +72,7 @@ impl EncodingSemantics {
      * This will be called any time an affected area by changes has changed
      */
     fn checks_on_only_affected_area(node: Node, document: &mut DocumentData) {
+        TermSemantic::on_node(node, document);
         StatementSemantics::on_node(node, document);
     }
 
@@ -96,6 +97,17 @@ impl EncodingSemantics {
         for refmulti in document.semantics.statement_semantics.iter() {
             document.semantics.old_node_ids_encountered.insert(*refmulti.key());
         }
+    }
+
+    /**
+     * Get a clone of the statement semantics for a specific node, if none where found a new StatementSemantics object will be generated
+     */
+    pub fn get_statement_semantics_for_node(&self, node_id: usize) -> StatementSemantics {
+        if self.statement_semantics.contains_key(&node_id) {
+            return self.statement_semantics.get(&node_id).unwrap().value().clone();
+        }
+
+        StatementSemantics::new()
     }
 }
 

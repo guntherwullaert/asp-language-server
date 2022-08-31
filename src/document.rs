@@ -98,11 +98,18 @@ impl DocumentData {
                 new_end_position 
             });
 
+            //TODO: Test to see if it still works
+            let mut offset = 1;
+            if start_byte == 0 {
+                offset = 0;
+            }
+            changed_ranges.push(Interval{ start: start_byte - offset, stop: new_end_byte + 2, val: 0 });
+            /*
             if start_byte <= new_end_byte {
                 changed_ranges.push(Interval{ start: start_byte, stop: new_end_byte + 1, val: 0 });
             } else  {
                 changed_ranges.push(Interval{ start: new_end_byte, stop: start_byte + 1, val: 0 });
-            }
+            }*/
 
             let duration = time.elapsed();
             info!("Time needed for editing the tree: {:?}", duration);
@@ -117,7 +124,12 @@ impl DocumentData {
 
         let time = Instant::now();
         for change in old_tree.changed_ranges(&self.tree) {
-            changed_ranges.push(Interval { start: change.start_byte, stop: change.end_byte + 1, val: 0 })
+            // -1 because when checking overlap we don't include the start_byte, +2 on the end because the datastructure is exclusive and the overlap finding is exclusive as well
+            let mut offset = 1;
+            if change.start_byte == 0 {
+                offset = 0;
+            }
+            changed_ranges.push(Interval { start: change.start_byte - offset, stop: change.end_byte + 2, val: 0 })
         }
 
         // make lapper structure which will allow us to efficiently search if a range was changed
@@ -182,7 +194,6 @@ impl DocumentData {
         let duration = time.elapsed();
         info!("Time needed for finding the ranges that changed: {:?}", duration);
 
-
         info!("Changed Ranges: {:?}", lapper.intervals);
         
         self.generate_semantics(Some(lapper));
@@ -197,7 +208,5 @@ impl DocumentData {
 
     pub fn generate_semantics(&mut self, changed_ranges: Option<Lapper<usize, usize>>) {
         analyze_tree(self, &changed_ranges);
-
-        //info!("Statement Semantics: {:?}", self.semantics.statement_semantics);
     }
 }

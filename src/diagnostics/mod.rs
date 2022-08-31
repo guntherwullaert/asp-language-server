@@ -4,6 +4,7 @@ use log::info;
 use tower_lsp::Client;
 
 use crate::document::DocumentData;
+use crate::diagnostics::statement_analysis::statement_analysis;
 
 use self::{
     diagnostic_run_data::DiagnosticsRunData,
@@ -39,7 +40,7 @@ pub fn run_diagnostics(
     
     //analyze_expressions(&mut diagnostic_data, document);
 
-    //statement_analysis(&mut diagnostic_data, document);
+    statement_analysis(&mut diagnostic_data, &document);
 
     //Once done send all diagnostic info to the client
     /*let err = tokio::time::timeout(Duration::from_millis(1000), client

@@ -4,14 +4,14 @@ use dashmap::DashMap;
 use log::info;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tree_sitter::{Node, TreeCursor};
-/*
-use crate::{document::DocumentData, diagnostics::tree_utils::SpecialLiteralSemantics};
+
+use crate::{document::DocumentData, semantics::{encoding_semantic::EncodingSemantics, special_literal_semantic::SpecialLiteralSemantics}};
 
 //#[cfg(test)]
 //use crate::test_utils::create_test_document;
 
 use super::{
-    diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::{retrace, EncodingSemantics, do_simple_query},
+    diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::retrace,
 };
 
 /**
@@ -32,35 +32,7 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
         };
 
         if node.kind() == "statement" {
-            /*let empty = &mut Vec::new();
-            let (variables, scopes) = get_variables_under_scope(&cursor);
-            let (unsafe_vars, safe_vars) =
-                check_nodes_for_safety_under_scope(node, variables, empty, &document.source);
-
-            throw_unsafe_error_for_vars(unsafe_vars, diagnostic_data);
-
-            // Repeat process for other scopes
-            //TODO: can there be a scope in a scope ?
-            for scope in scopes {
-                let safe_variables = &mut safe_vars.clone();
-                let (scoped_variables, _) = get_variables_under_scope(&scope);
-                let (scoped_unsafe_vars, _) = check_nodes_for_safety_under_scope(
-                    scope.node(),
-                    scoped_variables,
-                    safe_variables,
-                    &document.source,
-                );
-
-                throw_unsafe_error_for_vars(scoped_unsafe_vars, diagnostic_data);
-            }
-
-            diagnostic_data.create_linter_diagnostic(
-                node.range(),
-                DiagnosticSeverity::INFORMATION,
-                DiagnosticsCode::UnsafeVariable.into_i32(),
-                format!("'{:?}' are safe", document.semantics.get_vars_for_node(&node.id())),
-            );*/
-            //TODO: check_safety_of_statement(&node, &document.semantics, diagnostic_data, document.source.as_bytes());
+            check_safety_of_statement(&node, &document.semantics, diagnostic_data);
         }
 
         if cursor.goto_first_child() {
@@ -92,12 +64,9 @@ fn calculate_safe_set(dependencies: &mut Vec<(HashSet<String>, HashSet<String>)>
     //If we are not in a global context, change dependencies according to vars \ G
     if !global {
         dep = get_dependencies_only_occuring_in_set(&dep, vars_in_dependency.difference(global_vars).cloned().collect());
-        info!("Variables only occuring in local context: {:?}", vars_in_dependency.difference(global_vars).cloned().collect::<HashSet<String>>());
     }
 
     loop {
-        info!("Starting new round of safety checking with dep: {:?}", dep);
-
         // Have a mutable reference for closure
         let safe_set_ref = &mut safe_set;
 
@@ -105,17 +74,12 @@ fn calculate_safe_set(dependencies: &mut Vec<(HashSet<String>, HashSet<String>)>
         dep.retain(|(provide, depend)| {
             // If all dependencies are in our safe set, then the dependency requirements are met
             if depend.is_subset(safe_set_ref) {
-                info!("Found a tuple that has all the dependencies provided: ({:?}, {:?}) with safety ({:?})", provide, depend, safe_set_ref);
                 // Everything that is provided is thus also safe
                 safe_set_ref.extend(provide.iter().cloned());
 
                 // Remove this dependency from the dependencies list
                 return false;
             }
-            else {
-                info!("Passing tuple ({:?}, {:?}) as not all dependencies are provided: {:?}", provide, depend, safe_set_ref);
-            }
-            
             true
         });
 
@@ -144,224 +108,55 @@ fn get_dependencies_only_occuring_in_set(dependencies: & Vec<(HashSet<String>, H
 /**
  * Check if a statement is safe
  */
-fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagnostics: &mut DiagnosticsRunData, source: &[u8]) {
-    let mut dep = semantics.get_dependency_for_node(&node.id());
-
-    info!("Starting safety check of statement with dependencies: {:?}", dep);
+fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagnostics: &mut DiagnosticsRunData) {
+    let statement_semantics = semantics.get_statement_semantics_for_node(node.id());
+    let mut dep = statement_semantics.dependencies;
 
     // Find all global variables
-    let global_vars = semantics.get_global_vars_for_node(&node.id());
-    info!("Found global variables: {:?}", global_vars);
+    let global_vars = statement_semantics.global_vars;
+    
+    info!("Checking Safety of statement with dependency set: {:?} and global variables: {:?} and vars: {:?}", &dep, &global_vars, statement_semantics.vars);
 
     let (global_safe_set, vars_in_dependency) = calculate_safe_set(&mut get_dependencies_only_occuring_in_set(&dep, global_vars.clone()), &global_vars, true);
 
     let mut local_unsafe_sets: Vec<(SpecialLiteralSemantics, HashSet<String>)> = Vec::new();
 
     //Calculate for local contexts
-    for literal in semantics.get_special_literals_for_node(&node.id()) {
-        info!("Checking safety for literal: {:?}", literal);
+    for literal in statement_semantics.special_literals {
         let (local_safe_set, local_vars_in_dependency) = calculate_safe_set(&mut literal.local_dependency.clone(), &global_vars, false);
 
         let unsafe_vars : HashSet<String> = local_vars_in_dependency.difference(&local_safe_set).cloned().collect();
         local_unsafe_sets.push((literal, unsafe_vars.difference(&vars_in_dependency).cloned().collect()));
-        info!("Found this unsafe set: {:?}", local_unsafe_sets.last().unwrap().1);
     }
 
     let mut unsafe_set: HashSet<String> = vars_in_dependency.difference(&global_safe_set).cloned().collect();
+    let variable_locations = statement_semantics.vars_locations;
 
-    for (literal, set) in local_unsafe_sets {
-        let variable_locations = literal.variable_locations;
+    for (_, set) in local_unsafe_sets {
         for unsafe_var in set.iter() {
-            for (range, name) in &variable_locations {
-                if unsafe_var == name {
-                    diagnostics.create_linter_diagnostic(*range, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
+            let locations = variable_locations.get(unsafe_var);
+            if let Some(l) = locations {
+                for location in l {
+                    diagnostics.create_linter_diagnostic(*location, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
                 }
+            } else {
+                info!("Could not find variable that should be in variable list: {}", unsafe_var);
             }
         }
     }
-    
-    info!("Found this global unsafe set: {:?}", unsafe_set);
-    let variable_locations = do_simple_query("(VARIABLE) @name", node, source);
+
+    //TODO: Merge these 2 into a function
     for unsafe_var in unsafe_set.iter() {
-        for (range, name, _) in &variable_locations {
-            if unsafe_var == name {
-                diagnostics.create_linter_diagnostic(*range, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
+        let locations = variable_locations.get(unsafe_var);
+        if let Some(l) = locations {
+            for location in l {
+                diagnostics.create_linter_diagnostic(*location, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
             }
-        }
-    }
-
-}
-
-/**
- * Looks through the tree and see which variables are found under this scope.
- * Also returns extra scopes it found in this scope
- */
-fn get_variables_under_scope<'a>(cur: &'a TreeCursor) -> (Vec<Node<'a>>, Vec<TreeCursor<'a>>) {
-    let mut variables = Vec::new();
-    let mut scopes = Vec::new();
-    let mut cursor = cur.clone();
-
-    let root = cursor.node();
-    let mut reached_root = false;
-
-    //Jump into the scope
-    cursor.goto_first_child();
-
-    while !reached_root {
-        let node = cursor.node();
-
-        if node.kind() == root.kind() || node.kind() == "statement" {
-            //We have explored everything
-            return (variables, scopes);
-        } else if node.kind() == "VARIABLE" {
-            //We have found a variable add it to the list
-            variables.push(node);
-        } else if node.kind() == "disjunction"
-            || node.kind() == "conjunction"
-            || node.kind() == "bodyaggregate"
-        {
-            //We entered a different scope, add it to the list of scopes to be check later
-            scopes.push(cursor.clone());
-
-            //Don't explore this element any further
-            (cursor, reached_root) = retrace(cursor);
-            continue;
-        }
-
-        if cursor.goto_first_child() {
-            continue;
-        }
-
-        if node.next_sibling().is_none()
-            && node.parent().is_some()
-            && node.parent().unwrap().kind() == root.kind()
-        {
-            //We have explored everything
-            return (variables, scopes);
-        }
-
-        if cursor.goto_next_sibling() {
-            continue;
-        }
-
-        (cursor, reached_root) = retrace(cursor);
-    }
-    (variables, scopes)
-}
-
-/**
- * Checks if every variable found is safe in this scope
- */
-fn check_nodes_for_safety_under_scope<'a>(
-    scope: Node,
-    to_check_variables: Vec<Node>,
-    known_safe_variables: &'a mut Vec<&'a str>,
-    source: &'a str,
-) -> (DashMap<&'a str, Vec<tree_sitter::Range>>, Vec<&'a str>) {
-    let mut safe_variables = Vec::new();
-    safe_variables.append(known_safe_variables);
-    let unsafe_variables = DashMap::new();
-
-    //Go through each variable from the bottom,
-    for variable in to_check_variables {
-        let mut inspected_node = variable;
-        let mut reached_atom_once = false;
-        while inspected_node != scope {
-            // goto parent if it exists
-            match inspected_node.parent() {
-                Some(parent) => inspected_node = parent,
-                None => break,
-            }
-
-            if inspected_node == scope {
-                break;
-            }
-            // if these variables are in the body add them to the safe list
-            // We also need to have reached atom once, otherwise we are only in a equation
-            else if inspected_node.kind() == "bodydot" && reached_atom_once {
-                safe_variables.push(variable.utf8_text(source.as_bytes()).unwrap());
-                //diagnostic_data.create_linter_diagnostic(variable.range(), DiagnosticSeverity::INFORMATION, 0, "body dot safed variable".to_string());
-                break;
-            }
-            // if we reach this cannot lead to safety
-            else if inspected_node.kind() == "atom" {
-                reached_atom_once = true;
-                match inspected_node.prev_sibling() {
-                    Some(prev) => {
-                        if prev.kind() == "NOT" {
-                            break;
-                        }
-                    }
-                    None => {
-                        //If we are in a conjunction we set variables to safe
-                        if scope.kind() == "conjunction" {
-                            safe_variables.push(variable.utf8_text(source.as_bytes()).unwrap());
-                            //diagnostic_data.create_linter_diagnostic(variable.range(), DiagnosticSeverity::INFORMATION, 0, "conjunction safed variable".to_string());
-                            break;
-                        }
-                    }
-                }
-            }
-            // If we have an assignment before an aggegrate that value becomes safe
-            else if inspected_node.kind() == "term" {
-                match inspected_node.parent() {
-                    Some(parent) => {
-                        if parent.kind() == "lubodyaggregate" {
-                            safe_variables.push(variable.utf8_text(source.as_bytes()).unwrap());
-                            break;
-                        }
-                    }
-                    None => {}
-                }
-            }
-            //If we see a COLON before us, then we are a safe variable for this context
-            match inspected_node.prev_sibling() {
-                Some(before) => {
-                    if before.kind() == "COLON" {
-                        safe_variables.push(variable.utf8_text(source.as_bytes()).unwrap());
-                        //diagnostic_data.create_linter_diagnostic(variable.range(), DiagnosticSeverity::INFORMATION, 0, "COLON safed variable".to_string());
-                        break;
-                    }
-                }
-                None => {}
-            }
-        }
-
-        let name = variable.utf8_text(source.as_bytes()).unwrap();
-        if !unsafe_variables.contains_key(name) {
-            unsafe_variables.insert(name, vec![variable.range()]);
         } else {
-            unsafe_variables
-                .get_mut(name)
-                .unwrap()
-                .push(variable.range());
+            info!("Could not find variable that should be in variable list: {}", unsafe_var);
         }
     }
 
-    for safe in &safe_variables {
-        unsafe_variables.remove(safe);
-    }
-
-    (unsafe_variables, safe_variables)
-}
-
-/**
- * creates a diagnostic error for each of the unsafe variables
- */
-fn throw_unsafe_error_for_vars(
-    vars: DashMap<&str, Vec<tree_sitter::Range>>,
-    diagnostic_data: &mut DiagnosticsRunData,
-) {
-    for var in &vars {
-        for range in var.value() {
-            diagnostic_data.create_linter_diagnostic(
-                *range,
-                DiagnosticSeverity::ERROR,
-                DiagnosticsCode::UnsafeVariable.into_i32(),
-                format!("'{}' is unsafe", var.key()),
-            );
-        }
-    }
 }
 
 /*
@@ -979,5 +774,4 @@ fn negated_not_equals_should_be_handled_as_equals() {
 
     assert_eq!(diags.total_diagnostics.len(), 0);
 }
-*/
 */

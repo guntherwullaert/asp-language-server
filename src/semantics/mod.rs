@@ -13,6 +13,7 @@ mod error_semantic;
 mod missing_semantic;
 mod statement_semantic;
 mod term_semantic;
+pub mod special_literal_semantic;
 mod syntax;
 
 /**

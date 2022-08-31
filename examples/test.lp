@@ -18,4 +18,4 @@ color(red; green; blue).
 
 :- edge(node(SOME_NODE)) :- node(SOME_NODE), SOME_NODE != 0. %% Interesting bug, tree sitter is smart enough to create a dot between them but doesn't output an error
 
-a :- b # a.dsdf#
+a :- b.
