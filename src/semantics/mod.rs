@@ -13,6 +13,8 @@ mod error_semantic;
 mod missing_semantic;
 mod statement_semantic;
 mod term_semantic;
+mod predicate_semantics;
+pub mod predicate_occurence_semantics;
 pub mod special_literal_semantic;
 mod syntax;
 

@@ -18,27 +18,6 @@ pub enum LiteralType {
 }
 
 /**
- * The location of an occurence in the encoding
- */
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub enum AtomOccurenceLocation {
-    Head,
-    Body,
-    Condition
-}
-
-
-/**
- * Atom Occurence semantics contain all the information needed to know where and what an occurence of an atom contains
- */
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub struct AtomOccurenceSemantics {
-    pub node_id: usize,
-    pub range: tree_sitter::Range,
-    pub location: AtomOccurenceLocation,
-}
-
-/**
  * Special Literal semantics contain all the information needed around a conditional literal or aggregate
  */
 #[derive(Clone, Debug)]

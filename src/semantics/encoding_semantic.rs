@@ -7,7 +7,7 @@ use tree_sitter::{Node, Range};
 
 use crate::document::DocumentData;
 
-use super::{error_semantic::{ErrorSemantic}, syntax::Syntax, statement_semantic::{StatementSemantics, self}, term_semantic::TermSemantic};
+use super::{error_semantic::{ErrorSemantic}, syntax::Syntax, statement_semantic::{StatementSemantics, self}, term_semantic::TermSemantic, predicate_semantics::PredicateSemantics};
 
 /**
  * Encoding semantics are all the information needed about the program that then can be used by the other parts of the LSP
@@ -15,6 +15,7 @@ use super::{error_semantic::{ErrorSemantic}, syntax::Syntax, statement_semantic:
 #[derive(Clone, Debug)]
 pub struct EncodingSemantics {
     pub syntax: Syntax,
+    pub predicate_semantics: PredicateSemantics,
     pub statement_semantics: DashMap<usize, StatementSemantics>,
     pub old_node_ids_encountered: DashSet<usize>,
     pub node_ids_encountered: DashSet<usize>
@@ -24,6 +25,7 @@ impl EncodingSemantics {
     pub fn new() -> EncodingSemantics {
         EncodingSemantics { 
             syntax: Syntax::new(),
+            predicate_semantics: PredicateSemantics::new(),
             statement_semantics: DashMap::new(),
             old_node_ids_encountered: DashSet::new(),
             node_ids_encountered: DashSet::new()
@@ -48,6 +50,7 @@ impl EncodingSemantics {
 
         // Check if node is affected by the changes
         // This is quite expensive to find out
+        // We sadly have to check if the key is in use, because sometimes node id's are changed that are not in the changed nodes list
         if let Some(ranges) = changed_ranges {
             if ranges.find(node.range().start_byte, node.range().end_byte).any(|_| true) || !document.semantics.statement_semantics.contains_key(&node.id()) {
                 EncodingSemantics::checks_on_only_affected_area(node, document);
@@ -80,6 +83,7 @@ impl EncodingSemantics {
      * This will be called everytime we check the document for semantics
      */
     fn checks_that_always_need_to_happen(node: Node, document: &mut DocumentData) {
+        PredicateSemantics::on_node(node, document);
         Syntax::on_node(node, document);
     }
 
