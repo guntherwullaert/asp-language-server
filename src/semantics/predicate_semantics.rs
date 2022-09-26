@@ -42,7 +42,7 @@ impl PredicateSemantics {
      */
     pub fn get_predicates_arity_for_node(&self, node: &usize) -> usize {
         if self.predicates_arity.contains_key(node) {
-            return self.predicates_arity.get(node).unwrap().value().clone();
+            return self.predicates_arity.get(node).unwrap().clone();
         }
         0
     }
@@ -93,5 +93,6 @@ impl Semantics for PredicateSemantics {
 
     fn startup(document: &mut crate::document::DocumentData) {
         document.semantics.predicate_semantics.predicates = DashMap::new();
+        document.semantics.predicate_semantics.predicates_arity = DashMap::new();
     }
 }

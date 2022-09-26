@@ -40,6 +40,7 @@ impl EncodingSemantics {
         document.semantics.old_node_ids_encountered = DashSet::new();
 
         Syntax::startup(document);
+        PredicateSemantics::startup(document);
     }
 
     /**
