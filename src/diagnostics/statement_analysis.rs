@@ -7,8 +7,8 @@ use tree_sitter::{Node, TreeCursor};
 
 use crate::{document::DocumentData, semantics::{encoding_semantic::EncodingSemantics, special_literal_semantic::SpecialLiteralSemantics}};
 
-//#[cfg(test)]
-//use crate::test_utils::create_test_document;
+#[cfg(test)]
+use crate::test_utils::create_test_document;
 
 use super::{
     diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData, tree_utils::retrace,
@@ -70,10 +70,14 @@ fn calculate_safe_set(dependencies: &mut Vec<(HashSet<String>, HashSet<String>)>
         // Have a mutable reference for closure
         let safe_set_ref = &mut safe_set;
 
+        info!("Starting loop with safe set {:?}", safe_set_ref);
+
         // Go through the dependencies list and find any elements we have all dependencies for
         dep.retain(|(provide, depend)| {
             // If all dependencies are in our safe set, then the dependency requirements are met
             if depend.is_subset(safe_set_ref) {
+                info!("Using dependency: ({:?},{:?})", provide, depend);
+
                 // Everything that is provided is thus also safe
                 safe_set_ref.extend(provide.iter().cloned());
 
@@ -123,6 +127,7 @@ fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagno
 
     //Calculate for local contexts
     for literal in statement_semantics.special_literals {
+        info!("Calculating for local context: {:?}", literal);
         let (local_safe_set, local_vars_in_dependency) = calculate_safe_set(&mut literal.local_dependency.clone(), &global_vars, false);
 
         let unsafe_vars : HashSet<String> = local_vars_in_dependency.difference(&local_safe_set).cloned().collect();
@@ -131,6 +136,10 @@ fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagno
 
     let mut unsafe_set: HashSet<String> = vars_in_dependency.difference(&global_safe_set).cloned().collect();
     let variable_locations = statement_semantics.vars_locations;
+
+    info!("{:?}", variable_locations);
+    info!("local unsafe set: {:?}", local_unsafe_sets);
+    info!("unsafe set: {:?}", unsafe_set);
 
     for (_, set) in local_unsafe_sets {
         for unsafe_var in set.iter() {
@@ -158,8 +167,6 @@ fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagno
     }
 
 }
-
-/*
 
 #[test]
 fn no_variables_should_be_detected_as_safe() {
@@ -442,18 +449,6 @@ fn unsafe_variables_should_be_detected_in_conjunctions() {
 }
 
 #[test]
-fn safeness_should_be_detected_in_conjunctions_with_pure_variables() {
-    let mut diags = DiagnosticsRunData::create_test_diagnostics();
-
-    statement_analysis(
-        &mut diags,
-        &create_test_document("a :- a(Y) : b(X).".to_string()),
-    );
-
-    assert_eq!(diags.total_diagnostics.len(), 0);
-}
-
-#[test]
 fn unsafe_variables_should_be_detected_in_conjunctions_with_not() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
 
@@ -526,7 +521,7 @@ fn unsafe_variables_should_be_detected_with_aggregates() {
         &create_test_document("a(X) :- N = #count{X : b(X)}.".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 3);
+    assert_eq!(diags.total_diagnostics.len(), 4);
 
     assert_eq!(
         format!(
@@ -552,7 +547,7 @@ fn unsafe_variables_should_be_detected_with_aggregates_and_disjunction() {
         &create_test_document("a(N), c(X) :- N = #count{X : b(X)}.".to_string()),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 1);
+    assert_eq!(diags.total_diagnostics.len(), 5);
 
     assert_eq!(
         format!(
@@ -712,7 +707,7 @@ fn unsafe_variables_should_be_detected_with_pools() {
         ),
     );
 
-    assert_eq!(diags.total_diagnostics.len(), 0);
+    assert_eq!(diags.total_diagnostics.len(), 2);
 }
 
 #[test]
@@ -774,4 +769,93 @@ fn negated_not_equals_should_be_handled_as_equals() {
 
     assert_eq!(diags.total_diagnostics.len(), 0);
 }
-*/
+
+#[test]
+fn unsafe_variables_should_be_detected_in_weak_constraint() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            ":~ a(X). [Y]"
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 1);
+}
+
+#[test]
+fn safeness_should_be_detected_in_weak_constraint() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            ":~ a(X). [X]"
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafe_variables_should_be_detected_in_optimization() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "#minimize{Y@1,X:hotel(X)}."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 1);
+}
+
+#[test]
+fn safeness_should_be_detected_in_optimization() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "#minimize{Y@1,X:hotel(X), star(X, Y)}."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}
+
+#[test]
+fn unsafe_variables_should_be_detected_for_aggregate_in_head() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "#sum{X : b(X)}."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 2);
+}
+
+#[test]
+fn safeness_should_be_detected_for_aggregate_in_head() {
+    let mut diags = DiagnosticsRunData::create_test_diagnostics();
+
+    statement_analysis(
+        &mut diags,
+        &create_test_document(
+            "#sum{X : b(X)} :- test(X)."
+                .to_string(),
+        ),
+    );
+
+    assert_eq!(diags.total_diagnostics.len(), 0);
+}

@@ -1,11 +1,11 @@
 use std::str::FromStr;
 
+use crate::{document::DocumentData};
+
+use ropey::Rope;
 use tower_lsp::lsp_types::Url;
 use tree_sitter::Parser;
 
-use crate::{document::DocumentData};
-
-/*
 pub fn create_test_document(source: String) -> DocumentData {
     let mut parser = Parser::new();
     parser
@@ -14,8 +14,7 @@ pub fn create_test_document(source: String) -> DocumentData {
 
     let tree = parser.parse(source.clone(), None).unwrap();
 
-    let mut doc = DocumentData::new(Url::from_str("file://test.lp").unwrap(), tree, source, 1);
-    doc.semantics = analyze_tree(&doc.tree, &doc.source);
+    let mut doc = DocumentData::new(Url::from_str("file://test.lp").unwrap(), tree, Rope::from_str(&source), 1);
+    doc.generate_semantics(None);
     doc
 }
-*/

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use log::info;
 use tree_sitter::{Range, Node, Point};
 
 use crate::document::DocumentData;
@@ -68,7 +69,7 @@ impl TermSemantic {
                 if node.child_count() == 1 {
                     //If we only have one child we pass on the values of that child
                     let child = document.semantics.get_statement_semantics_for_node(node.child(0).unwrap().id()).term;
-                    
+
                     kind = child.kind.clone();
                     value = child.value.clone();
                 } else if node.child_count() > 2 {
@@ -177,7 +178,8 @@ impl Semantics for TermSemantic {
     fn on_node(node: Node, document: &mut DocumentData) {
         match node.kind() {
             "dec" | "NUMBER" | "term" | "VARIABLE" | "identifier" => {
-                document.semantics.get_statement_semantics_for_node(node.id()).term = TermSemantic::from_node(node, document);
+                let term = TermSemantic::from_node(node, document);
+                StatementSemantics::update_term_for_node(&document.semantics, node.id(), term);
             }
             _ => {}
         }

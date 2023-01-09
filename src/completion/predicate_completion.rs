@@ -1,3 +1,4 @@
+use log::info;
 use tower_lsp::lsp_types::{CompletionContext, CompletionItem, CompletionItemKind, InsertTextFormat};
 use tree_sitter::Node;
 
@@ -29,8 +30,13 @@ pub fn predicate_completion_resolver(document: &DocumentData, context: Completio
         }
 
         // Give a suggestion for each atom in the document
-        for ((identifier, arity), _) in document.semantics.predicate_semantics.predicates.clone() {
+        for ((identifier, arity), occurences) in document.semantics.predicate_semantics.predicates.clone() {
             let mut insert_text_snippet = identifier.clone();
+
+            // Check if this predicate isn't at the current location of the cursor, if it is we do not suggest this predicate
+            if occurences.len() == 1 && document.get_source_for_range(node.unwrap().range()) == identifier{
+                continue;
+            }
 
             if arity > 0 {
                 insert_text_snippet += "(";

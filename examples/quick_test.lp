@@ -1,0 +1,1 @@
+#sum{X : b(X)} :- test(X).

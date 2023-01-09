@@ -54,9 +54,16 @@ impl Semantics for PredicateSemantics {
         //Find all predicates with their arity
         match node.kind() {
             "atom" | "term" => {
-                if node.child_count() >= 3 && node.child(0).unwrap().kind() == "identifier" {
-                    let identifier = document.get_source_for_range(node.child(0).unwrap().range());
-                    let arity = document.semantics.predicate_semantics.get_predicates_arity_for_node(&node.child(2).unwrap().id()) + 1;
+                let mut identifier;
+                let mut arity : usize = 0;
+                if node.child_count() == 1 && node.child(0).unwrap().kind() == "identifier" {
+                    identifier = document.get_source_for_range(node.child(0).unwrap().range());
+                }
+                if (node.child_count() == 1 || node.child_count() >= 3) && node.child(0).unwrap().kind() == "identifier" {
+                    identifier = document.get_source_for_range(node.child(0).unwrap().range());
+                    if node.child_count() != 1 {
+                        arity = document.semantics.predicate_semantics.get_predicates_arity_for_node(&node.child(2).unwrap().id()) + 1;
+                    }
 
                     let mut location = PredicateOccurenceLocation::Head;
                     let mut parent = node.parent();
@@ -69,7 +76,7 @@ impl Semantics for PredicateSemantics {
                         parent = parent.unwrap().parent();
                     }
 
-                    Self::insert_predicate_for_node(&document.semantics, identifier.clone(), arity, PredicateOccurenceSemantics {
+                    Self::insert_predicate_for_node(&document.semantics, identifier, arity, PredicateOccurenceSemantics {
                         node_id: node.id(),
                         range: node.range(),
                         location

@@ -1,4 +1,4 @@
-use std::{collections::{HashSet, HashMap}, hash::Hash};
+use std::{collections::{HashSet, HashMap}, hash::Hash, vec};
 
 use dashmap::DashMap;
 use log::info;
@@ -24,6 +24,7 @@ pub struct StatementSemantics {
      * Which variables are contained in this part of the encoding
      */
     pub vars_locations: HashMap<String, Vec<Range>>,
+    //TODO: Fix memory leak and find variable locations when analyzing instead of in semantics
 
     /**
      * Which variables are globally defined in this part of the encoding
@@ -137,6 +138,14 @@ impl StatementSemantics {
     }
 
     /**
+     * Set term for this statement
+     */
+    pub fn with_term(mut self, term: TermSemantic) -> StatementSemantics {
+        self.term = term;
+        self
+    }
+
+    /**
      * Update vars for a node, if there is no statement semantics object for that node it creates one
      */
     pub fn update_vars_for_node(semantics: &EncodingSemantics, node_id: usize, new_value: HashSet<String>) {
@@ -238,6 +247,18 @@ impl StatementSemantics {
         semantics.statement_semantics.insert(node_id, StatementSemantics::new().with_special_literals(new_value));
     }
 
+    /**
+     * Update term for a node, if there is no statement semantics object for that node it creates one
+     */
+    pub fn update_term_for_node(semantics: &EncodingSemantics, node_id: usize, new_value: TermSemantic) {
+        if semantics.statement_semantics.contains_key(&node_id) {
+            semantics.statement_semantics.get_mut(&node_id).unwrap().term = new_value;
+            return;
+        }
+
+        semantics.statement_semantics.insert(node_id, StatementSemantics::new().with_term(new_value));
+    }
+
 
     /**
      * Check if a variable occurs in this node, if not we pass on the variables in our children. 
@@ -281,7 +302,13 @@ impl StatementSemantics {
     fn pass_on_vars_locations_from_children(node: Node, document: &mut DocumentData) {
         let mut vars_in_children = HashMap::new();
         for child in node.children(&mut node.walk()) {
-            vars_in_children.extend(document.semantics.get_statement_semantics_for_node(child.id()).vars_locations);
+            for (var, locations) in document.semantics.get_statement_semantics_for_node(child.id()).vars_locations {
+                if !vars_in_children.contains_key(&var) {
+                    vars_in_children.insert(var, locations);
+                } else {
+                    vars_in_children.get_mut(&var).unwrap().extend(locations.clone());
+                }
+            }
         }
         Self::update_vars_locations_for_node(&document.semantics, node.id(), vars_in_children);
     }
@@ -728,17 +755,17 @@ impl StatementSemantics {
                         dependencies.push((lower_bounds_term_semantics.provide, aggr_vars.clone()));
                         dependencies.push((HashSet::new(), lower_bounds_term_semantics.depend));
                         
-                        global_vars.extend(document.semantics.get_statement_semantics_for_node(lower_bounds_term.unwrap().id()).global_vars);
+                        global_vars.extend(document.semantics.get_statement_semantics_for_node(lower_bounds_term.unwrap().id()).vars);
                     }
                     if upper_bounds.is_some() && upper_bounds.unwrap() == "EQ" {
                         let upper_bounds_term_semantics = document.semantics.get_statement_semantics_for_node(upper_bounds_term.unwrap().id());
                         dependencies.push((upper_bounds_term_semantics.provide, aggr_vars));
                         dependencies.push((HashSet::new(), upper_bounds_term_semantics.depend));
     
-                        global_vars.extend(document.semantics.get_statement_semantics_for_node(upper_bounds_term.unwrap().id()).global_vars);
+                        global_vars.extend(document.semantics.get_statement_semantics_for_node(upper_bounds_term.unwrap().id()).vars);
                     }
                     if !((lower_bounds.is_some() && lower_bounds.unwrap() == "EQ") || (upper_bounds.is_some() && upper_bounds.unwrap() == "EQ")) {
-                        // If there isn't an assignment then all global variables will be the dependency for this aggregate
+                        // If there isn't an assignment then all variables will be the dependency for this aggregate
                         let vars = document.semantics.get_statement_semantics_for_node(node.id()).vars;
                         dependencies.push((HashSet::new(), vars));
                     }
@@ -761,7 +788,9 @@ impl StatementSemantics {
                     let mut local_dependency = Vec::new();
     
                     // if there is an condition only pass on the variables which are not in the condition
+                    info!("term vars: {:?} - right vars: {:?}", terms_semantics.vars, condition_semantics.vars);
                     let vars : HashSet<String> = terms_semantics.vars.difference(&condition_semantics.vars).cloned().collect();
+                    info!("vars {:?}", vars);
                     global_vars.extend(vars);
     
                     // find out the local dependencies
@@ -769,6 +798,7 @@ impl StatementSemantics {
                     local_dependency.extend(condition_semantics.dependencies);
     
                     //update the special literal semantics
+                    Self::update_global_vars_for_node(&document.semantics, node.id(), global_vars);
                     Self::update_special_literals_for_node(&document.semantics, node.id(), vec![SpecialLiteralSemantics::new_with_dep(&node, local_dependency)]);
                 } else if node.child_count() >= 3 {
                     let left_child = node.child(0).unwrap();
@@ -817,25 +847,53 @@ impl StatementSemantics {
                 // We have a disjunction in the head
                 let vars = document.semantics.get_statement_semantics_for_node(node.id()).vars;
                 let dep = vec![(HashSet::new(), vars)];
+                let mut global_vars = HashSet::new();
                 let mut offset = 0;
+
+                if node.child_count() == 0 { return }
     
                 if node.child_count() >= 1 {
                     let disjunctionsep = node.child(0).unwrap();
     
                     if disjunctionsep.kind() == "disjunctionsep" {
+                        //Pass on any global variables from the disjunction seperator children
+                        global_vars.extend(document.semantics.get_statement_semantics_for_node(disjunctionsep.id()).global_vars);
                         offset += 1;
                     }
                 }
-    
-                if node.child_count() >= 3 { // literal -- colon -- litvec
+                
+                if node.child_count() == 2 && node.child(0).unwrap().kind() == "disjunctionsep" {
+                    //There is no condition to this disjunction this means that this child should be a literal and needs to pass on its global vars
+                    global_vars.extend(document.semantics.get_statement_semantics_for_node(node.child(1).unwrap().id()).global_vars);
+                } else if node.child_count() >= 3 { // literal -- colon -- litvec
                     let local_literal = node.child(offset).unwrap();
-                    let condition = node.child(2).unwrap();
+                    let seperator = node.child(offset+1).unwrap();
+
+                    //Find the correct node that represents the condition
+                    let condition : Node = 
+                        if seperator.kind() == "COLON" {
+                            node.child(offset+2).unwrap()
+                        } else if seperator.kind() == "optcondition" && seperator.child_count() >= 2 {
+                            seperator.child(2).unwrap()
+                        } else {
+                            // Should never trigger
+                            node.child(0).unwrap()
+                        };
     
                     // for the global context we return all variables that are not in the local context
-                    Self::update_global_vars_for_node(&document.semantics, node.id(), document.semantics.get_statement_semantics_for_node(local_literal.id()).vars.difference(&document.semantics.get_statement_semantics_for_node(condition.id()).vars).cloned().collect());
+                    global_vars.extend(document.semantics.get_statement_semantics_for_node(local_literal.id()).vars.difference(&document.semantics.get_statement_semantics_for_node(condition.id()).vars).cloned());
                 }
+
+                info!("Found disjunction with global var: ({:?})", global_vars);
                 
+                Self::update_global_vars_for_node(&document.semantics, node.id(), global_vars);
                 Self::update_dependencies_for_node(&document.semantics, node.id(), dep);
+            }
+            "headaggregate" => {
+                info!("head: {:?}", document.semantics.get_statement_semantics_for_node(node.id()).global_vars)
+            }
+            "luheadaggregate" => {
+                info!("luhead: {:?}", document.semantics.get_statement_semantics_for_node(node.id()).global_vars)
             }
             //TODO: Check if these global_vars can be simplified to the actual node
             "minelemlist" | "maxelemlist" => {
@@ -896,6 +954,23 @@ impl StatementSemantics {
             }
         }
     }
+
+    /**
+     * Pass on special literals if needed
+     */
+    fn check_special_literals(node: Node, document: &mut DocumentData) {
+        // Pass on special literals if needed
+        match node.kind() {
+            "conjunction" | "altheadaggrelemvec" | "disjunction" => {},
+            "bodyaggrelem" => {
+                Self::update_special_literals_for_node(&document.semantics, node.id(), vec![SpecialLiteralSemantics::new(&node, document)])
+            },
+            "source_file" => {} // Ignore any fields above statements
+            _ => {
+                Self::pass_on_special_literals_from_children(node, document);
+            }
+        }
+    }
 }
 
 impl Semantics for StatementSemantics {
@@ -905,5 +980,6 @@ impl Semantics for StatementSemantics {
         StatementSemantics::check_depend(node, document);
         StatementSemantics::check_dependencies(node, document);
         StatementSemantics::check_global_vars(node, document);
+        StatementSemantics::check_special_literals(node, document);
     }
 }

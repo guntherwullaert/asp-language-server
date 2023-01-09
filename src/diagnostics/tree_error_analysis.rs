@@ -54,10 +54,8 @@ pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document:
     }
 }
 
-//#[cfg(test)]
-//use crate::test_utils::create_test_document;
-/*
-
+#[cfg(test)]
+use crate::test_utils::create_test_document;
 #[test]
 fn unknown_character_should_throw_unknown_parser_error() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
@@ -81,7 +79,6 @@ fn unknown_character_should_throw_unknown_parser_error() {
         format!("Number({})", DiagnosticsCode::UnknownParseState.into_i32())
     );
 }
-
 #[test]
 fn if_parser_expects_dot_throw_dot_parser_error() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
@@ -105,7 +102,6 @@ fn if_parser_expects_dot_throw_dot_parser_error() {
         format!("Number({})", DiagnosticsCode::ExpectedDot.into_i32())
     );
 }
-
 #[test]
 fn if_parser_misses_token_throw_missing_token() {
     let mut diags = DiagnosticsRunData::create_test_diagnostics();
@@ -132,4 +128,3 @@ fn if_parser_misses_token_throw_missing_token() {
         )
     );
 }
-*/

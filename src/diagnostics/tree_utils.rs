@@ -14,6 +14,7 @@ pub fn humanize_token(token: &str) -> &str {
         "LPAREN" => "(",
         "RBRACE" => "{",
         "LBRACE" => "}",
+        "COMMA" => ",",
         "DOT" => ".",
         _ => token,
     }
