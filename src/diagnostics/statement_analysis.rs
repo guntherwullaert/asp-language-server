@@ -2,8 +2,8 @@ use std::{collections::HashSet, hash::Hash};
 
 use dashmap::DashMap;
 use log::info;
-use tower_lsp::lsp_types::DiagnosticSeverity;
-use tree_sitter::{Node, TreeCursor};
+use tower_lsp::lsp_types::{DiagnosticSeverity, lsif::Document};
+use tree_sitter::{Node, TreeCursor, QueryCursor, Query};
 
 use crate::{document::DocumentData, semantics::{encoding_semantic::EncodingSemantics, special_literal_semantic::SpecialLiteralSemantics}};
 
@@ -32,7 +32,7 @@ pub fn statement_analysis(diagnostic_data: &mut DiagnosticsRunData, document: &D
         };
 
         if node.kind() == "statement" {
-            check_safety_of_statement(&node, &document.semantics, diagnostic_data);
+            check_safety_of_statement(&node, &document, diagnostic_data);
         }
 
         if cursor.goto_first_child() {
@@ -110,10 +110,32 @@ fn get_dependencies_only_occuring_in_set(dependencies: & Vec<(HashSet<String>, H
 }
 
 /**
+ * Find all variables occuring in a part of the encoding
+ */
+fn get_variables_in_statement<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> std::vec::Vec<(tree_sitter::Range, &'a str, tree_sitter::Node<'a>)>{
+    let mut query_cursor = QueryCursor::new();
+    let query = Query::new(tree_sitter_clingo::language(), "(VARIABLE) @name").unwrap();
+
+    let matches = query_cursor.matches(&query, *node, source);
+    let mut output = Vec::new();
+
+    for each_match in matches {
+        for capture in each_match.captures.iter() {
+            let range = capture.node.range();
+            let name = capture.node.utf8_text(source).unwrap();
+
+            output.push((range, name, capture.node));
+        }
+    }
+
+    output
+}
+
+/**
  * Check if a statement is safe
  */
-fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagnostics: &mut DiagnosticsRunData) {
-    let statement_semantics = semantics.get_statement_semantics_for_node(node.id());
+fn check_safety_of_statement(node : &Node, document: &DocumentData, diagnostics: &mut DiagnosticsRunData) {
+    let statement_semantics = document.semantics.get_statement_semantics_for_node(node.id());
     let mut dep = statement_semantics.dependencies;
 
     // Find all global variables
@@ -135,37 +157,27 @@ fn check_safety_of_statement(node : &Node, semantics: &EncodingSemantics, diagno
     }
 
     let mut unsafe_set: HashSet<String> = vars_in_dependency.difference(&global_safe_set).cloned().collect();
-    let variable_locations = statement_semantics.vars_locations;
+
+    //Due to the fact that the variable locations could have changed in terms of byte range, we look for the variables again
+    let source = document.get_bytes();
+    let variable_locations = get_variables_in_statement(node, &source);
+    let mut unsafe_vars = unsafe_set.clone();
 
     info!("{:?}", variable_locations);
     info!("local unsafe set: {:?}", local_unsafe_sets);
     info!("unsafe set: {:?}", unsafe_set);
 
+    //First combine the lists of all unsafe variables in the statements
     for (_, set) in local_unsafe_sets {
-        for unsafe_var in set.iter() {
-            let locations = variable_locations.get(unsafe_var);
-            if let Some(l) = locations {
-                for location in l {
-                    diagnostics.create_linter_diagnostic(*location, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
-                }
-            } else {
-                info!("Could not find variable that should be in variable list: {}", unsafe_var);
-            }
-        }
+        unsafe_vars = unsafe_vars.union(&set).cloned().collect();
     }
 
-    //TODO: Merge these 2 into a function
-    for unsafe_var in unsafe_set.iter() {
-        let locations = variable_locations.get(unsafe_var);
-        if let Some(l) = locations {
-            for location in l {
-                diagnostics.create_linter_diagnostic(*location, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", unsafe_var))
-            }
-        } else {
-            info!("Could not find variable that should be in variable list: {}", unsafe_var);
+    //Next we create a diagnostic for every variable we find in the variable_locations list that occurs in the unsafe_vars list
+    for (location, var, _) in variable_locations {
+        if unsafe_vars.contains(var) {
+            diagnostics.create_linter_diagnostic(location, DiagnosticSeverity::ERROR, DiagnosticsCode::UnsafeVariable.into_i32(), format!("'{}' is unsafe", var))
         }
     }
-
 }
 
 #[test]

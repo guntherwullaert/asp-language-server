@@ -1,1 +1,1 @@
-#sum{X : b(X)} :- test(X).
+a(TESTING) :- a(B), b(TESTING), c(YNOT).

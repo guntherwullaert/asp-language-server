@@ -20,10 +20,6 @@ pub struct StatementSemantics {
      */
     pub vars: HashSet<String>,
 
-    /**
-     * Which variables are contained in this part of the encoding
-     */
-    pub vars_locations: HashMap<String, Vec<Range>>,
     //TODO: Fix memory leak and find variable locations when analyzing instead of in semantics
 
     /**
@@ -61,7 +57,6 @@ impl StatementSemantics {
     pub fn new() -> StatementSemantics {
         StatementSemantics {
             vars: HashSet::new(),
-            vars_locations: HashMap::new(),
             global_vars: HashSet::new(),
             provide: HashSet::new(),
             depend: HashSet::new(),
@@ -76,24 +71,6 @@ impl StatementSemantics {
      */
     pub fn with_vars(mut self, vars: HashSet<String>) -> StatementSemantics {
         self.vars = vars;
-        self
-    }
-
-    /**
-     * Set vars locations set for this statement
-     */
-    pub fn with_vars_location(mut self, variable: String, location: Range) -> StatementSemantics {
-        let mut vars_locations = HashMap::new();
-        vars_locations.insert(variable, vec![location]);
-        self.vars_locations = vars_locations;
-        self
-    }
-
-    /**
-     * Set vars locations set for this statement
-     */
-    pub fn with_vars_location_value(mut self, value: HashMap<String, Vec<Range>>) -> StatementSemantics {
-        self.vars_locations = value;
         self
     }
 
@@ -155,36 +132,6 @@ impl StatementSemantics {
         }
 
         semantics.statement_semantics.insert(node_id, StatementSemantics::new().with_vars(new_value));
-    }
-
-    /**
-     * Update vars locations for a node, if there is no statement semantics object for that node it creates one
-     */
-    pub fn update_vars_locations_for_node_for_var(semantics: &EncodingSemantics, node_id: usize, variable: String, location: Range) {
-        if semantics.statement_semantics.contains_key(&node_id) {
-            let locations = &mut semantics.statement_semantics.get_mut(&node_id).unwrap().vars_locations;
-            if locations.contains_key(&variable) {
-                locations.get_mut(&variable).unwrap().push(location);
-            }
-            else {
-                locations.insert(variable, vec![location]);
-            }
-            return;
-        }
-
-        semantics.statement_semantics.insert(node_id, StatementSemantics::new().with_vars_location(variable, location));
-    }
-
-    /**
-     * Update vars locations for a node, if there is no statement semantics object for that node it creates one
-     */
-    pub fn update_vars_locations_for_node(semantics: &EncodingSemantics, node_id: usize, new_value: HashMap<String, Vec<Range>>) {
-        if semantics.statement_semantics.contains_key(&node_id) {
-            semantics.statement_semantics.get_mut(&node_id).unwrap().vars_locations = new_value;
-            return;
-        }
-
-        semantics.statement_semantics.insert(node_id, StatementSemantics::new().with_vars_location_value(new_value));
     }
 
     /**
@@ -270,7 +217,6 @@ impl StatementSemantics {
                 let var_name = document.get_source_for_range(node.range());
                 set.insert(var_name.clone());
                 Self::update_vars_for_node(&document.semantics, node.id(), set);
-                Self::update_vars_locations_for_node_for_var(&document.semantics, node.id(), var_name, node.range());
             }
             "source_file" => {} // Ignore any fields above statements
             _ => {
@@ -279,7 +225,6 @@ impl StatementSemantics {
                     vars_in_children.extend(document.semantics.get_statement_semantics_for_node(child.id()).vars);
                 }
                 Self::update_vars_for_node(&document.semantics, node.id(), vars_in_children);
-                Self::pass_on_vars_locations_from_children(node, document);
             }
         }
     }
@@ -294,23 +239,6 @@ impl StatementSemantics {
             return true;
         }
         false
-    }
-
-    /**
-     * Combine every vars location in the children of node and set this as the vars locations for this node
-     */
-    fn pass_on_vars_locations_from_children(node: Node, document: &mut DocumentData) {
-        let mut vars_in_children = HashMap::new();
-        for child in node.children(&mut node.walk()) {
-            for (var, locations) in document.semantics.get_statement_semantics_for_node(child.id()).vars_locations {
-                if !vars_in_children.contains_key(&var) {
-                    vars_in_children.insert(var, locations);
-                } else {
-                    vars_in_children.get_mut(&var).unwrap().extend(locations.clone());
-                }
-            }
-        }
-        Self::update_vars_locations_for_node(&document.semantics, node.id(), vars_in_children);
     }
 
     /**
