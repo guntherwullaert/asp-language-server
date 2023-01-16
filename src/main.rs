@@ -87,11 +87,6 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        info!(
-            "File {} opened with text: {:?} and version {:?}",
-            params.text_document.uri, params.text_document.text, params.text_document.version
-        );
-
         let time = Instant::now();
 
         // Use rope for an efficient way to access byte offsets and string slices
