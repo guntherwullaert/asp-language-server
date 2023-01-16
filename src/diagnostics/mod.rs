@@ -1,19 +1,10 @@
-use std::time::Duration;
-
-use log::info;
-use tower_lsp::Client;
-
-use crate::document::DocumentData;
 use crate::diagnostics::statement_analysis::statement_analysis;
+use crate::document::DocumentData;
 
-use self::{
-    diagnostic_run_data::DiagnosticsRunData,
-    tree_error_analysis::search_for_tree_error,
-};
+use self::{diagnostic_run_data::DiagnosticsRunData, tree_error_analysis::search_for_tree_error};
 
 mod diagnostic_codes;
 mod diagnostic_run_data;
-mod expression_analysis;
 mod statement_analysis;
 mod tree_error_analysis;
 pub mod tree_utils;
@@ -25,7 +16,6 @@ pub fn run_diagnostics(
     document: DocumentData,
     maximum_number_of_problems: u32,
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-
     //Setup the diagnostics run data object to be used for this diagnostics run
     let mut diagnostic_data = DiagnosticsRunData {
         maximum_number_of_problems,
@@ -37,7 +27,7 @@ pub fn run_diagnostics(
     //document.semantics = analyze_tree(&document.tree, &document.source);
 
     search_for_tree_error(&mut diagnostic_data, &document);
-    
+
     //analyze_expressions(&mut diagnostic_data, document);
 
     statement_analysis(&mut diagnostic_data, &document);
