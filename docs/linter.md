@@ -1,22 +1,14 @@
 # Linting Errors
 ## 2000 - Unsafe Variable
-TODO
-
-## 2001 - Undefined Operation
-An operation can be undefined if the combination of 2 terms does not have a definition for that operation.
+A variable was depended upon without being provided.
 
 Erroneous code examples:
 ```
-:- b + a = 0.
-:- b + X = 0.
-:- X * X + y = 0.
+a(X) :- b(Z).
 ```
 
-Remove any literals in an expression as these do not have a definition for any of the operators in clingo.
-
-For example:
+Ensure in its simplest form that each variable occuring in the head occurs in the body
+For Example:
 ```
-:- b(X), a(Y), X+Y = 0.
-:- b(Y), Y + X = 0.
-:- X * X + Y = 0.
+a(X) :- b(X).
 ```

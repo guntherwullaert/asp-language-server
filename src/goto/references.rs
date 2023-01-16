@@ -1,4 +1,3 @@
-use log::info;
 use tower_lsp::lsp_types::{Location, Position};
 use tree_sitter::Point;
 
@@ -22,11 +21,6 @@ pub fn check_goto_references(document: &DocumentData, position: Position) -> Opt
                 row: position.line as usize,
                 column: (position.character) as usize,
             },
-        );
-
-        info!(
-            "Predicates: {:?}",
-            document.semantics.predicate_semantics.predicates
         );
 
         let ret = get_occurences_for_predicate(

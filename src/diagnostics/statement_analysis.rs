@@ -1,4 +1,3 @@
-use log::info;
 use std::collections::HashSet;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 use tree_sitter::{Node, Query, QueryCursor};
@@ -84,14 +83,10 @@ fn calculate_safe_set(
         // Have a mutable reference for closure
         let safe_set_ref = &mut safe_set;
 
-        info!("Starting loop with safe set {:?}", safe_set_ref);
-
         // Go through the dependencies list and find any elements we have all dependencies for
         dep.retain(|(provide, depend)| {
             // If all dependencies are in our safe set, then the dependency requirements are met
             if depend.is_subset(safe_set_ref) {
-                info!("Using dependency: ({:?},{:?})", provide, depend);
-
                 // Everything that is provided is thus also safe
                 safe_set_ref.extend(provide.iter().cloned());
 
@@ -175,8 +170,6 @@ fn check_safety_of_statement(
     // Find all global variables
     let global_vars = statement_semantics.global_vars;
 
-    info!("Checking Safety of statement with dependency set: {:?} and global variables: {:?} and vars: {:?}", &dep, &global_vars, statement_semantics.vars);
-
     let (global_safe_set, vars_in_dependency) = calculate_safe_set(
         &mut get_dependencies_only_occuring_in_set(&dep, global_vars.clone()),
         &global_vars,
@@ -187,7 +180,6 @@ fn check_safety_of_statement(
 
     //Calculate for local contexts
     for literal in statement_semantics.special_literals {
-        info!("Calculating for local context: {:?}", literal);
         let (local_safe_set, local_vars_in_dependency) =
             calculate_safe_set(&mut literal.local_dependency.clone(), &global_vars, false);
 
@@ -213,10 +205,6 @@ fn check_safety_of_statement(
     let source = document.get_bytes();
     let variable_locations = get_variables_in_statement(node, &source);
     let mut unsafe_vars = unsafe_set.clone();
-
-    info!("{:?}", variable_locations);
-    info!("local unsafe set: {:?}", local_unsafe_sets);
-    info!("unsafe set: {:?}", unsafe_set);
 
     //First combine the lists of all unsafe variables in the statements
     for (_, set) in local_unsafe_sets {

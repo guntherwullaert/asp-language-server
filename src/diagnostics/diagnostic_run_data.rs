@@ -1,5 +1,8 @@
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 
+/**
+ * A object that contains all the diagnostic data which was found
+ */
 #[derive(Debug)]
 pub struct DiagnosticsRunData {
     pub maximum_number_of_problems: u32,

@@ -1,9 +1,14 @@
-# asp-lsp
- A language server protocol for ASP
+# asp-language-server
+ A language server for ASP. With an extension for vs-code for testing purposes based on the template found here: https://github.com/IWANABETHATGUY/tower-lsp-boilerplate.
 
 ## How to use ?
 
-First you need to compile the language server protocol
+First you need to install all node packages with:
+```console
+pnpm i
+```
+
+Next compile the language server protocol:
 ```console
 cargo build
 ```

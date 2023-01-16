@@ -1,1 +1,0 @@
-a(TESTING) :- a(B), b(TESTING), c(YNOT).

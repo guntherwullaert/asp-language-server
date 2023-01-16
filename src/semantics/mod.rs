@@ -2,29 +2,25 @@ use std::time::Instant;
 
 use log::info;
 use rust_lapper::Lapper;
-use tree_sitter::Range;
 
 use crate::document::DocumentData;
 
-use self::encoding_semantic::{EncodingSemantics};
+use self::encoding_semantic::EncodingSemantics;
 
 pub mod encoding_semantic;
 mod error_semantic;
 mod missing_semantic;
-mod statement_semantic;
-mod term_semantic;
-mod predicate_semantics;
 pub mod predicate_occurence_semantics;
+mod predicate_semantics;
 pub mod special_literal_semantic;
+mod statement_semantic;
 mod syntax;
+mod term_semantic;
 
 /**
  * Goes through the tree post order and populates the encoding semantics object in the document
  */
-pub fn analyze_tree(
-    document: &mut DocumentData,
-    changed_ranges: &Option<Lapper<usize, usize>>
-) {
+pub fn analyze_tree(document: &mut DocumentData, changed_ranges: &Option<Lapper<usize, usize>>) {
     let doc = document.clone();
     let mut cursor = doc.tree.walk();
 
@@ -33,7 +29,10 @@ pub fn analyze_tree(
     EncodingSemantics::startup(document);
 
     let duration = time.elapsed();
-    info!("Time needed for starting up semantic analysis: {:?}", duration);
+    info!(
+        "Time needed for starting up semantic analysis: {:?}",
+        duration
+    );
 
     let time = Instant::now();
     let mut reached_root = false;

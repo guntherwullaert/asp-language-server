@@ -23,27 +23,9 @@ pub fn run_diagnostics(
         total_diagnostics: Vec::new(),
     };
 
-    //Analyze the tree and get all the semantic data out of it
-    //document.semantics = analyze_tree(&document.tree, &document.source);
-
     search_for_tree_error(&mut diagnostic_data, &document);
 
-    //analyze_expressions(&mut diagnostic_data, document);
-
     statement_analysis(&mut diagnostic_data, &document);
-
-    //Once done send all diagnostic info to the client
-    /*let err = tokio::time::timeout(Duration::from_millis(1000), client
-    .publish_diagnostics(
-        document.uri.clone(),
-        diagnostic_data.total_diagnostics.clone(),
-        Some(document.version),
-    )).await;
-
-    if err.is_err() {
-        info!("Could not send diagnostics in under a second");
-    }
-    */
 
     diagnostic_data.total_diagnostics
 }

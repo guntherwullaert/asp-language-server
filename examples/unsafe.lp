@@ -35,4 +35,3 @@ a(X) :- a(Y), not Y != X.
 :~ a(X). [X]
 #minimize{Y@1,X:hotel(X)}.
 #minimize{Y@1,X:hotel(X), star(X, Y)}.
-%TODO: aggregates in the head

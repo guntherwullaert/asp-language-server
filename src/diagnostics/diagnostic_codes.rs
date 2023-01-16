@@ -15,7 +15,6 @@ pub enum DiagnosticsCode {
      * ERROR CODES ANALYSIS
      */
     UnsafeVariable = 2000,
-    UndefinedOperation = 2001,
 }
 
 impl DiagnosticsCode {

@@ -1,4 +1,4 @@
-use tree_sitter::{Range, Node};
+use tree_sitter::{Node, Range};
 
 /**
  * Contains any semantic information around an error
@@ -17,7 +17,6 @@ pub struct ErrorSemantic {
 }
 
 impl ErrorSemantic {
-
     /**
      * Create a new ErrorSemantic struct based on a node
      */

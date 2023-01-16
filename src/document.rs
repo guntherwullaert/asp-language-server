@@ -1,10 +1,10 @@
-use std::{time::Instant, sync::{Arc, atomic::AtomicUsize}};
+use std::time::Instant;
 
 use log::info;
 use ropey::Rope;
 use rust_lapper::{Interval, Lapper};
-use tower_lsp::lsp_types::{Url, TextDocumentContentChangeEvent, Position};
-use tree_sitter::{Tree, InputEdit, Point, Parser, Range};
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
+use tree_sitter::{InputEdit, Parser, Point, Range, Tree};
 
 use crate::semantics::{analyze_tree, encoding_semantic::EncodingSemantics};
 
@@ -14,7 +14,7 @@ pub struct DocumentData {
     pub tree: Tree,
     pub source: Rope,
     pub version: i32,
-    pub semantics: EncodingSemantics
+    pub semantics: EncodingSemantics,
 }
 impl DocumentData {
     pub fn new(uri: Url, tree: Tree, source: Rope, version: i32) -> DocumentData {
@@ -23,7 +23,7 @@ impl DocumentData {
             tree,
             source,
             version,
-            semantics: EncodingSemantics::new()
+            semantics: EncodingSemantics::new(),
         }
     }
 
@@ -37,19 +37,24 @@ impl DocumentData {
         array
     }
 
-    pub fn convert_position_to_point(position : Position) -> Point {
+    pub fn convert_position_to_point(position: Position) -> Point {
         Point {
             row: position.line as usize,
-            column: position.character as usize
+            column: position.character as usize,
         }
     }
 
     pub fn get_source_for_range(&self, range: Range) -> String {
-        self.source.byte_slice(range.start_byte..range.end_byte).to_string()
+        self.source
+            .byte_slice(range.start_byte..range.end_byte)
+            .to_string()
     }
 
-    pub fn update_document(&mut self, changes: Vec<TextDocumentContentChangeEvent>, parser: &mut Parser) {
-        
+    pub fn update_document(
+        &mut self,
+        changes: Vec<TextDocumentContentChangeEvent>,
+        parser: &mut Parser,
+    ) {
         let old_tree = &self.tree.clone();
         let mut changed_ranges: Vec<Interval<usize, usize>> = Vec::with_capacity(10);
 
@@ -63,8 +68,10 @@ impl DocumentData {
             // Figure out where we should replace this rope
             let time = Instant::now();
             let range = change.range.unwrap();
-            let start_char = self.source.line_to_char(range.start.line as usize) + range.start.character as usize;
-            let end_char = self.source.line_to_char(range.end.line as usize) + range.end.character as usize;
+            let start_char = self.source.line_to_char(range.start.line as usize)
+                + range.start.character as usize;
+            let end_char =
+                self.source.line_to_char(range.end.line as usize) + range.end.character as usize;
 
             let start_byte = self.source.char_to_byte(start_char);
             let old_end_byte = self.source.char_to_byte(end_char);
@@ -81,7 +88,7 @@ impl DocumentData {
             let new_end_column = new_end_byte - self.source.line_to_byte(new_end_line);
             let new_end_position = Point {
                 row: new_end_line,
-                column: new_end_column
+                column: new_end_column,
             };
 
             let duration = time.elapsed();
@@ -95,21 +102,18 @@ impl DocumentData {
                 old_end_byte,
                 old_end_position: DocumentData::convert_position_to_point(range.end),
                 new_end_byte,
-                new_end_position 
+                new_end_position,
             });
 
-            //TODO: Test to see if it still works
             let mut offset = 1;
             if start_byte == 0 {
                 offset = 0;
             }
-            changed_ranges.push(Interval{ start: start_byte - offset, stop: new_end_byte + 2, val: 0 });
-            /*
-            if start_byte <= new_end_byte {
-                changed_ranges.push(Interval{ start: start_byte, stop: new_end_byte + 1, val: 0 });
-            } else  {
-                changed_ranges.push(Interval{ start: new_end_byte, stop: start_byte + 1, val: 0 });
-            }*/
+            changed_ranges.push(Interval {
+                start: start_byte - offset,
+                stop: new_end_byte + 2,
+                val: 0,
+            });
 
             let duration = time.elapsed();
             info!("Time needed for editing the tree: {:?}", duration);
@@ -129,7 +133,11 @@ impl DocumentData {
             if change.start_byte == 0 {
                 offset = 0;
             }
-            changed_ranges.push(Interval { start: change.start_byte - offset, stop: change.end_byte + 2, val: 0 })
+            changed_ranges.push(Interval {
+                start: change.start_byte - offset,
+                stop: change.end_byte + 2,
+                val: 0,
+            })
         }
 
         // make lapper structure which will allow us to efficiently search if a range was changed
@@ -192,18 +200,12 @@ impl DocumentData {
         }*/
 
         let duration = time.elapsed();
-        info!("Time needed for finding the ranges that changed: {:?}", duration);
+        info!(
+            "Time needed for finding the ranges that changed: {:?}",
+            duration
+        );
 
-        info!("Changed Ranges: {:?}", lapper.intervals);
-        
         self.generate_semantics(Some(lapper));
-
-        /*if changed_ranges.len() < 10 {
-            self.generate_semantics(Some(changed_ranges));
-        } else {
-            self.generate_semantics(None);
-            info!("Too many changes, doing a full document scan!");
-        }*/
     }
 
     pub fn generate_semantics(&mut self, changed_ranges: Option<Lapper<usize, usize>>) {

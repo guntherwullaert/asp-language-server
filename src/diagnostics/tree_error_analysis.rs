@@ -1,12 +1,9 @@
-use tower_lsp::lsp_types::DiagnosticSeverity;
-use tree_sitter::{Node, Range};
-
-use crate::document::DocumentData;
-
 use super::{
     diagnostic_codes::DiagnosticsCode, diagnostic_run_data::DiagnosticsRunData,
     tree_utils::humanize_token,
 };
+use crate::document::DocumentData;
+use tower_lsp::lsp_types::DiagnosticSeverity;
 
 /**
 * Search for errors in the parse tree.
@@ -22,7 +19,11 @@ pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document:
                 DiagnosticsCode::ExpectedDot.into_i32(),
                 format!(
                     "syntax error while parsing value: '{}', expected: '.'",
-                    document.source.byte_slice(error.range.start_byte..error.range.end_byte).as_str().unwrap()
+                    document
+                        .source
+                        .byte_slice(error.range.start_byte..error.range.end_byte)
+                        .as_str()
+                        .unwrap()
                 ),
             );
 
@@ -35,7 +36,11 @@ pub fn search_for_tree_error(diagnostic_data: &mut DiagnosticsRunData, document:
             DiagnosticsCode::UnknownParseState.into_i32(),
             format!(
                 "syntax error while parsing value: '{}'",
-                document.source.byte_slice(error.range.start_byte..error.range.end_byte).as_str().unwrap()
+                document
+                    .source
+                    .byte_slice(error.range.start_byte..error.range.end_byte)
+                    .as_str()
+                    .unwrap()
             ),
         );
     }

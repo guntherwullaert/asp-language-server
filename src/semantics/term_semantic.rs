@@ -1,11 +1,9 @@
 use std::collections::HashSet;
-
-use log::info;
-use tree_sitter::{Range, Node, Point};
+use tree_sitter::{Node, Point, Range};
 
 use crate::document::DocumentData;
 
-use super::{statement_semantic::StatementSemantics, encoding_semantic::Semantics};
+use super::{encoding_semantic::Semantics, statement_semantic::StatementSemantics};
 
 /**
  * What type of operation this term is
@@ -44,11 +42,16 @@ pub struct TermSemantic {
 
 impl TermSemantic {
     pub fn new() -> TermSemantic {
-        TermSemantic { 
-            operator: TermOperator::None, 
-            kind: TermType::Unknown, 
-            value: HashSet::new(), 
-            range: Range { start_byte: 0, end_byte: 0, start_point: Point { row: 0, column: 0 }, end_point: Point { row: 0, column: 0 } }
+        TermSemantic {
+            operator: TermOperator::None,
+            kind: TermType::Unknown,
+            value: HashSet::new(),
+            range: Range {
+                start_byte: 0,
+                end_byte: 0,
+                start_point: Point { row: 0, column: 0 },
+                end_point: Point { row: 0, column: 0 },
+            },
         }
     }
 
@@ -60,15 +63,23 @@ impl TermSemantic {
         match node.kind() {
             "dec" | "NUMBER" => {
                 kind = TermType::Constant;
-                value.insert(document.get_source_for_range(node.range()).parse::<usize>().unwrap_or_default());
-            },
+                value.insert(
+                    document
+                        .get_source_for_range(node.range())
+                        .parse::<usize>()
+                        .unwrap_or_default(),
+                );
+            }
             "VARIABLE" => kind = TermType::Variable,
             "identifier" => kind = TermType::Identifier,
             "term" => {
                 // We have a term, find out based on the children what type of term we have
                 if node.child_count() == 1 {
                     //If we only have one child we pass on the values of that child
-                    let child = document.semantics.get_statement_semantics_for_node(node.child(0).unwrap().id()).term;
+                    let child = document
+                        .semantics
+                        .get_statement_semantics_for_node(node.child(0).unwrap().id())
+                        .term;
 
                     kind = child.kind.clone();
                     value = child.value.clone();
@@ -93,14 +104,27 @@ impl TermSemantic {
                         _ => {}
                     }
                     //We check what the children are
-                    let left_child = document.semantics.get_statement_semantics_for_node(node.child(0).unwrap().id());
-                    let right_child = document.semantics.get_statement_semantics_for_node(node.child(2).unwrap().id());
+                    let left_child = document
+                        .semantics
+                        .get_statement_semantics_for_node(node.child(0).unwrap().id());
+                    let right_child = document
+                        .semantics
+                        .get_statement_semantics_for_node(node.child(2).unwrap().id());
 
-                    if left_child.term.kind == TermType::Constant && right_child.term.kind == TermType::Constant {
+                    if left_child.term.kind == TermType::Constant
+                        && right_child.term.kind == TermType::Constant
+                    {
                         //If both children are constant the resulting term is constant and we can evaluate the value of the constant
                         kind = TermType::Constant;
-                        value = TermSemantic::evaluate(&left_child.term, &right_child.term, &operator);
-                    } else if (left_child.term.kind == TermType::Variable && right_child.term.kind == TermType::Constant) || (left_child.term.kind == TermType::Constant && right_child.term.kind == TermType::Variable) || (left_child.term.kind == TermType::Variable && right_child.term.kind == TermType::Variable) {
+                        value =
+                            TermSemantic::evaluate(&left_child.term, &right_child.term, &operator);
+                    } else if (left_child.term.kind == TermType::Variable
+                        && right_child.term.kind == TermType::Constant)
+                        || (left_child.term.kind == TermType::Constant
+                            && right_child.term.kind == TermType::Variable)
+                        || (left_child.term.kind == TermType::Variable
+                            && right_child.term.kind == TermType::Variable)
+                    {
                         kind = TermType::Variable
                     } else {
                         kind = TermType::Unknown
@@ -118,7 +142,7 @@ impl TermSemantic {
         }
     }
 
-    pub fn evaluate(a : &TermSemantic, b : &TermSemantic, op : &TermOperator) -> HashSet<usize> {
+    pub fn evaluate(a: &TermSemantic, b: &TermSemantic, op: &TermOperator) -> HashSet<usize> {
         let mut result_set = HashSet::new();
 
         match op {
@@ -128,21 +152,21 @@ impl TermSemantic {
                         result_set.insert(s_i + s_j);
                     }
                 }
-            },
+            }
             TermOperator::Sub => {
                 for s_i in a.value.clone() {
                     for s_j in b.value.clone() {
                         result_set.insert(s_i - s_j);
                     }
                 }
-            },
+            }
             TermOperator::Mul => {
                 for s_i in a.value.clone() {
                     for s_j in b.value.clone() {
                         result_set.insert(s_i * s_j);
                     }
                 }
-            },
+            }
             TermOperator::Div => {
                 for s_i in a.value.clone() {
                     for s_j in b.value.clone() {
@@ -151,7 +175,7 @@ impl TermSemantic {
                         }
                     }
                 }
-            },
+            }
             _ => {}
         }
 
@@ -169,7 +193,7 @@ impl TermSemantic {
             "GT" => "LEQ",
             "LEQ" => "GT",
             "GEQ" => "LT",
-            _ => ""
+            _ => "",
         }
     }
 }

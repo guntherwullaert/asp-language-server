@@ -1,13 +1,11 @@
-use dashmap::{DashMap, DashSet};
-use im_rc::HashSet;
-use log::info;
-use rust_lapper::Lapper;
-use serde::__private::doc;
-use tree_sitter::{Node, Range};
-
+use super::{
+    predicate_semantics::PredicateSemantics, statement_semantic::StatementSemantics,
+    syntax::Syntax, term_semantic::TermSemantic,
+};
 use crate::document::DocumentData;
-
-use super::{error_semantic::{ErrorSemantic}, syntax::Syntax, statement_semantic::{StatementSemantics, self}, term_semantic::TermSemantic, predicate_semantics::PredicateSemantics};
+use dashmap::{DashMap, DashSet};
+use rust_lapper::Lapper;
+use tree_sitter::Node;
 
 /**
  * Encoding semantics are all the information needed about the program that then can be used by the other parts of the LSP
@@ -18,17 +16,17 @@ pub struct EncodingSemantics {
     pub predicate_semantics: PredicateSemantics,
     pub statement_semantics: DashMap<usize, StatementSemantics>,
     pub old_node_ids_encountered: DashSet<usize>,
-    pub node_ids_encountered: DashSet<usize>
+    pub node_ids_encountered: DashSet<usize>,
 }
 
 impl EncodingSemantics {
     pub fn new() -> EncodingSemantics {
-        EncodingSemantics { 
+        EncodingSemantics {
             syntax: Syntax::new(),
             predicate_semantics: PredicateSemantics::new(),
             statement_semantics: DashMap::new(),
             old_node_ids_encountered: DashSet::new(),
-            node_ids_encountered: DashSet::new()
+            node_ids_encountered: DashSet::new(),
         }
     }
 
@@ -36,7 +34,8 @@ impl EncodingSemantics {
      * This can be used if any cleanup of previous iterations needs to be done to the document and is called just before analysis starts
      */
     pub fn startup(document: &mut DocumentData) {
-        document.semantics.node_ids_encountered = document.semantics.old_node_ids_encountered.clone();
+        document.semantics.node_ids_encountered =
+            document.semantics.old_node_ids_encountered.clone();
         document.semantics.old_node_ids_encountered = DashSet::new();
 
         Syntax::startup(document);
@@ -46,14 +45,25 @@ impl EncodingSemantics {
     /**
      * On discovering a node this function gets called and all the analyzers need to decide what this means now
      */
-    pub fn on_node(node: Node, document: &mut DocumentData, changed_ranges: &Option<Lapper<usize, usize>>) {
+    pub fn on_node(
+        node: Node,
+        document: &mut DocumentData,
+        changed_ranges: &Option<Lapper<usize, usize>>,
+    ) {
         document.semantics.node_ids_encountered.remove(&node.id());
 
         // Check if node is affected by the changes
         // This is quite expensive to find out
         // We sadly have to check if the key is in use, because sometimes node id's are changed that are not in the changed nodes list
         if let Some(ranges) = changed_ranges {
-            if ranges.find(node.range().start_byte, node.range().end_byte).any(|_| true) || !document.semantics.statement_semantics.contains_key(&node.id()) {
+            if ranges
+                .find(node.range().start_byte, node.range().end_byte)
+                .any(|_| true)
+                || !document
+                    .semantics
+                    .statement_semantics
+                    .contains_key(&node.id())
+            {
                 EncodingSemantics::checks_on_only_affected_area(node, document);
             }
             /*for (start_byte, end_byte) in ranges {
@@ -98,9 +108,13 @@ impl EncodingSemantics {
         }
 
         // Afterwards add all used nodes to the old list
-        document.semantics.old_node_ids_encountered = DashSet::with_capacity(document.semantics.statement_semantics.len());
+        document.semantics.old_node_ids_encountered =
+            DashSet::with_capacity(document.semantics.statement_semantics.len());
         for refmulti in document.semantics.statement_semantics.iter() {
-            document.semantics.old_node_ids_encountered.insert(*refmulti.key());
+            document
+                .semantics
+                .old_node_ids_encountered
+                .insert(*refmulti.key());
         }
     }
 
@@ -109,7 +123,12 @@ impl EncodingSemantics {
      */
     pub fn get_statement_semantics_for_node(&self, node_id: usize) -> StatementSemantics {
         if self.statement_semantics.contains_key(&node_id) {
-            return self.statement_semantics.get(&node_id).unwrap().value().clone();
+            return self
+                .statement_semantics
+                .get(&node_id)
+                .unwrap()
+                .value()
+                .clone();
         }
 
         StatementSemantics::new()
@@ -128,7 +147,5 @@ pub trait Semantics {
     /**
      * This can be used if any cleanup of previous iterations needs to be done to the document and is called just before analysis starts
      */
-    fn startup(document: &mut DocumentData) {
-
-    }
+    fn startup(_document: &mut DocumentData) {}
 }

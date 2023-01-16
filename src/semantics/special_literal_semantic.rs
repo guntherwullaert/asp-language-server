@@ -1,10 +1,7 @@
 use std::collections::HashSet;
 
-use tree_sitter::{Range, Node};
-
-use crate::{document::DocumentData};
-
-use super::encoding_semantic::EncodingSemantics;
+use crate::document::DocumentData;
+use tree_sitter::Node;
 
 /**
  * What type a literal is
@@ -14,7 +11,7 @@ pub enum LiteralType {
     Normal,
     Conjunction,
     AggregateElement,
-    Disjunction
+    Disjunction,
 }
 
 /**
@@ -27,31 +24,51 @@ pub struct SpecialLiteralSemantics {
     pub local_dependency: Vec<(HashSet<String>, HashSet<String>)>,
 }
 
-
 impl SpecialLiteralSemantics {
     pub fn new(node: &Node, document: &DocumentData) -> SpecialLiteralSemantics {
         let mut local_dependency: Vec<(HashSet<String>, HashSet<String>)> = Vec::new();
 
         match node.kind() {
-            "conjunction" | "disjunction" =>  {
+            "conjunction" | "disjunction" => {
                 if node.child_count() == 3 {
                     let l0 = node.child(0).unwrap();
                     let condition = node.child(2).unwrap();
-                    
-                    
-                    local_dependency.push((HashSet::new(), document.semantics.get_statement_semantics_for_node(l0.id()).vars));
-                    local_dependency.extend(document.semantics.get_statement_semantics_for_node(condition.id()).dependencies);
+
+                    local_dependency.push((
+                        HashSet::new(),
+                        document
+                            .semantics
+                            .get_statement_semantics_for_node(l0.id())
+                            .vars,
+                    ));
+                    local_dependency.extend(
+                        document
+                            .semantics
+                            .get_statement_semantics_for_node(condition.id())
+                            .dependencies,
+                    );
                 }
-            },
+            }
             "bodyaggrelem" => {
                 if node.child_count() >= 2 {
                     let terms = node.child(0).unwrap();
                     let condition = node.child(1).unwrap();
-                    
-                    local_dependency.push((HashSet::new(), document.semantics.get_statement_semantics_for_node(terms.id()).vars));
-                    local_dependency.extend(document.semantics.get_statement_semantics_for_node(condition.id()).dependencies);
+
+                    local_dependency.push((
+                        HashSet::new(),
+                        document
+                            .semantics
+                            .get_statement_semantics_for_node(terms.id())
+                            .vars,
+                    ));
+                    local_dependency.extend(
+                        document
+                            .semantics
+                            .get_statement_semantics_for_node(condition.id())
+                            .dependencies,
+                    );
                 }
-            },
+            }
             _ => {}
         }
 
@@ -62,14 +79,16 @@ impl SpecialLiteralSemantics {
                 "bodyaggrelem" => LiteralType::AggregateElement,
                 "altheadaggrelemvec" => LiteralType::AggregateElement,
                 "disjunction" => LiteralType::Disjunction,
-                _ => LiteralType::Normal
+                _ => LiteralType::Normal,
             },
-            local_dependency
+            local_dependency,
         }
     }
 
-    pub fn new_with_dep (node: &Node, local_dependency: Vec<(HashSet<String>, HashSet<String>)>) -> SpecialLiteralSemantics {
-
+    pub fn new_with_dep(
+        node: &Node,
+        local_dependency: Vec<(HashSet<String>, HashSet<String>)>,
+    ) -> SpecialLiteralSemantics {
         SpecialLiteralSemantics {
             id: node.id(),
             kind: match node.kind() {
@@ -77,9 +96,9 @@ impl SpecialLiteralSemantics {
                 "bodyaggrelem" => LiteralType::AggregateElement,
                 "altheadaggrelemvec" => LiteralType::AggregateElement,
                 "disjunction" => LiteralType::Disjunction,
-                _ => LiteralType::Normal
+                _ => LiteralType::Normal,
             },
-            local_dependency
+            local_dependency,
         }
     }
 }

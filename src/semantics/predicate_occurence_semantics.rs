@@ -15,5 +15,5 @@ pub struct PredicateOccurenceSemantics {
 pub enum PredicateOccurenceLocation {
     Head,
     Body,
-    Condition
+    Condition,
 }

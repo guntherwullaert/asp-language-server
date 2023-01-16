@@ -146,15 +146,7 @@ impl LanguageServer for Backend {
             return;
         }
 
-        info!(
-            "Document change incoming for document: {}\nWith the following changes: {:?}",
-            uri,
-            params.content_changes.clone()
-        );
-
         let mut document = self.document_map.get(&uri).unwrap().clone();
-
-        info!("Got document reference");
 
         let mut parser = Parser::new();
         parser
